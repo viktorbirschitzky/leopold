@@ -183,3 +183,11 @@ def get_shift_and_scale(cfg: ConfigDict) -> Tuple[float, float]:
     return DATASET_SHIFT_SCALE[cfg.train_dataset[0]]
   else:
     raise ValueError()
+
+def get_shift_and_scale_occ(cfg: ConfigDict) -> Tuple[float, float, jnp.array, jnp.array]:
+  if hasattr(cfg, 'scale') and hasattr(cfg, 'shift') and hasattr(cfg, 'scale_occ') and hasattr(cfg, 'shift_occ'):
+    return cfg.shift, cfg.scale, cfg.shift_occ, cfg.scale_occ
+  elif hasattr(cfg, 'train_dataset'):
+    return DATASET_SHIFT_SCALE[cfg.train_dataset[0]]
+  else:
+    raise ValueError()

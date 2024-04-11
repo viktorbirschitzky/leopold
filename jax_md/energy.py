@@ -47,7 +47,7 @@ from jax_md._energy.electrostatics import coulomb_neighbor_list
 # Define aliases different neural network primitives.
 bp = nn.behler_parrinello
 gnome = nn.gnome
-nequip = nn.nequip
+nequip = nn.nequip_pol
 
 maybe_downcast = util.maybe_downcast
 
@@ -2000,7 +2000,7 @@ def nequip_neighbor_list(displacement_fn,
     if _atoms is None:
       raise ValueError('A one-hot encoding of the atoms is required.')
     graph = featurizer(_atoms, position, neighbor, **kwargs)
-    return model.apply(params, graph)[0, 0]
+    return model.apply(params, graph)
 
   return neighbor_fn, init_fn, energy_fn
 
