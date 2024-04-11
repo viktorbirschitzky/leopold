@@ -407,8 +407,8 @@ class NequIPEnergyModel(nn.Module):
     final_irreps = Irreps('1x0e')
     final_irreps_mag = Irreps('2x0e')
 
-    h_node = Linear(irreps_out=second_to_final_irreps)(h_node)
-    atomic_output = Linear(irreps_out=final_irreps)(h_node).array
+    h_node_en = Linear(irreps_out=second_to_final_irreps)(h_node)
+    atomic_output = Linear(irreps_out=final_irreps)(h_node_en).array
 
     # shift + scale atomic energies
     atomic_output = self.scale * atomic_output + self.shift
