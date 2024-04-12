@@ -1,0 +1,6 @@
+hidden_irreps: 32x0e + 4x1e
+sh_irreps: 1x0e + 1x1e
+readial_net_n_hidden: 16
+graph_net_steps: 3
+n_neighbors: 18.0
+scalar_mlp_std: 4.0
