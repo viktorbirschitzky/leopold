@@ -62,7 +62,7 @@ def arg_parse() -> Namespace:
     parser.add_argument("--toccup_weight", type=float, default=64**2)
     parser.add_argument("--max_epoch", type=int, default=1000)
     parser.add_argument("--patience", type=int, default=200)
-    parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--learning_rate", type=float, default=1e-4)
 
     # General options
     parser.add_argument("--log_level", help="log level", type=str, default="INFO")
@@ -80,7 +80,7 @@ def default_config() -> ConfigDict:
     config.hidden_irreps = "32x0e + 4x1e"
     config.sh_irreps = "1x0e + 1x1e"
     config.num_basis = 8
-    config.r_max = 3.35
+    config.r_max = 5.0
     config.radial_net_nonlinearity = "raw_swish"
     config.radial_net_n_hidden = 16
     config.radial_net_n_layers = 2
@@ -491,18 +491,25 @@ def main():
             break
 
         # Using lax for training set since its usually big
-        train_iterator = iter(train)
+        # def _func(j, var):
+        #     params, opt_state, train_loss = var
+        #
+        #     params, opt_state, losses = update(params, opt_state, train[j])
+        #
+        #     return params, opt_state, train_loss.at[j].set(losses[0])
+        #
+        # params, opt_state, train_loss = fori_loop(
+        #     0,
+        #     len(train),
+        #     _func,
+        #     (params, opt_state, jnp.zeros(len(train))),
+        # )
 
-        def _func(j, var):
-            params, opt_state, train_loss = var
+        train_loss = jnp.array([])
+        for batch in train:
+            params, opt_state, losses = update(params, opt_state, batch)
 
-            params, opt_state, losses = update(params, opt_state, next(train_iterator))
-
-            return params, opt_state, train_loss.at[j].set(losses[0])
-
-        params, opt_state, train_loss = fori_loop(
-            0, len(train), _func, (params, opt_state, jnp.zeros(len(train)))
-        )
+            train_loss = jnp.append(train_loss, losses[0])
 
         train_loss = train_loss.mean()
 
@@ -520,6 +527,7 @@ def main():
 
         if valid_loss < lowest_loss:
             lowest_loss = valid_loss
+            patience_count = 0
 
             os.makedirs(args.chekpoints_dir, exist_ok=True)
             with open(os.path.join(args.chekpoints_dir, tag + ".pkl"), "wb") as f:

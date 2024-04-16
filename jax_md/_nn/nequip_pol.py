@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-from typing import Dict, Union, Tuple
+from typing import Dict, Union, Tuple, Optional
 
 import functools
 
@@ -25,7 +25,6 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax import tree_util
-from jax import vmap
 
 from jax_md import space
 from jax_md import util
@@ -40,6 +39,7 @@ from .e3nn_layer import Linear
 import operator
 
 from ml_collections import ConfigDict
+from dataclasses import field
 
 
 # Types
@@ -350,13 +350,21 @@ class NequIPEnergyModel(nn.Module):
 
     shift: float = 0.0
     scale: float = 1.0
-    shift_occ: jnp.array = jnp.zeros(94)
-    scale_occ: jnp.array = jnp.zeros(94)
+    shift_occ: Optional[jax.Array] = field(default=None)
+    scale_occ: Optional[jax.Array] = field(default=None)
     n_neighbors: float = 1.0
     scalar_mlp_std: float = 4.0
 
+    def __post_init__(self):
+        super().__post_init__()
+        if self.shift_occ is None:
+            self.shift_occ = jnp.zeros((self.n_elements, 2))
+
+        if self.scale_occ is None:
+            self.scale_occ = jnp.ones((self.n_elements, 2))
+
     @nn.compact
-    def __call__(self, graph) -> Tuple[Array, Array]:
+    def __call__(self, graph):
         r_max = jnp.float32(self.r_max)
         hidden_irreps = Irreps(self.hidden_irreps)
 
