@@ -14,22 +14,19 @@ import jax.numpy as jnp
 import jax.random as jrn
 
 from jax import vmap, jit, value_and_grad, tree_util
-from jax.lax import fori_loop
-
-# Jax MD
-from jax_md import nn, space, partition
-
-# ASE
-from ase.io import read
 
 # Optax
 import optax
 
+# Utils
+from utils import get_data_from_xyz, shuffle_data, get_all, batch_data, split_data
+from utils import get_model, evaluate_model
+
 # Types
-from jax import Array
 from ml_collections import ConfigDict
 from argparse import ArgumentParser, Namespace
-from typing import Union, Optional, Tuple, List, Callable, NamedTuple
+from typing import Union, Optional
+from utils import AtomsData
 
 
 # ---- HELPER FUNCTIONS
@@ -47,7 +44,7 @@ def arg_parse() -> Namespace:
     parser.add_argument("--name", type=str, default="POL_DYN")
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--results_dir", type=str, default="results")
-    parser.add_argument("--chekpoints_dir", type=str, default="checkpoints")
+    parser.add_argument("--checkpoints_dir", type=str, default="checkpoints")
     parser.add_argument("--logs_dir", type=str, default="logs")
 
     # Model specifics
@@ -66,6 +63,9 @@ def arg_parse() -> Namespace:
 
     # General options
     parser.add_argument("--log_level", help="log level", type=str, default="INFO")
+    parser.add_argument(
+        "--restart", help="restart from existing checkpoint", action="store_true"
+    )
 
     return parser.parse_args()
 
@@ -124,161 +124,6 @@ def setup_logger(
         fh.setFormatter(formatter)
 
         logger.addHandler(fh)
-
-
-# ---- DATABASE FUNCTIONS
-
-
-class AtomsData(NamedTuple):
-    energies: Array  # [..., ]
-    cell: Array  # [..., 3,3]
-    positions: Array  # [..., 3]
-    forces: Array  # [..., 3]
-    species: Array  # [..., n_species+1]
-    toccup: Array  # [..., 2]
-
-
-Dataset = List[AtomsData]
-
-
-def get_all(batch: Dataset, key: str) -> Array:
-    val = []
-    for data in batch:
-        val.extend(data._asdict()[key])
-
-    return jnp.array(val)
-
-
-def batch_data(data: AtomsData, batch_size: int) -> Dataset:
-    data_dict = data._asdict()
-    n_batch = 1 + (len(data.species) // batch_size)
-
-    batched_data = [dict() for _ in range(n_batch)]
-    for key in data_dict.keys():
-        vals = jnp.split(
-            data_dict[key],
-            [(i + 1) * batch_size for i in range(n_batch - 1)],
-            axis=0,
-        )
-
-        for batch, val in zip(batched_data, vals):
-            batch[key] = val
-
-    return [AtomsData(**batch) for batch in batched_data]
-
-
-def split_data(data: AtomsData, rateo: float) -> Tuple[AtomsData, AtomsData]:
-    data_dict = data._asdict()
-    first_dict, second_dict = dict(), dict()
-
-    split_idx = int(len(data.species) * rateo)
-    for key in data_dict.keys():
-        first_dict[key], second_dict[key] = jnp.split(
-            data_dict[key], [split_idx], axis=0
-        )
-
-    return (AtomsData(**first_dict), AtomsData(**second_dict))
-
-
-def shuffle_data(rng: Array, data: AtomsData) -> AtomsData:
-    permutation = jnp.arange(len(data.species))
-    permutation = jrn.permutation(rng, permutation)
-
-    dict_data = {key: val[permutation] for key, val in data._asdict().items()}
-
-    return AtomsData(**dict_data)
-
-
-def get_data_from_xyz(file: str) -> AtomsData:
-    atoms = read(file, index=":", format="extxyz")
-    if not isinstance(atoms, list):
-        atoms = [atoms]
-
-    # Informations about the chemical species
-    elements = set(atoms[0].get_atomic_numbers())
-    atom_num = jnp.array(atoms[0].get_atomic_numbers())
-
-    species = []
-    for z in elements:
-        species.append(jnp.where(atom_num == z, 1, 0).reshape(1, len(atom_num), 1))
-    species = jnp.repeat(jnp.concat(species, axis=2), len(atoms), axis=0)
-
-    # Collect all the other informations
-    energies, positions, forces, toccup, pol_state, cell = [], [], [], [], [], []
-    for atom in atoms:
-        energies.append(atom.get_potential_energy() / len(atom))
-        positions.append(atom.get_scaled_positions())
-        forces.append(atom.get_forces())
-        cell.append(atom.get_cell().array)
-
-        toccup.append(atom.arrays["toccup"])
-        pol_state.append(jnp.array(atom.arrays["pol_state"]).reshape(len(atom), 1))
-
-    return AtomsData(
-        energies=jnp.array(energies),
-        cell=jnp.array(cell),
-        positions=jnp.array(positions),
-        forces=jnp.array(forces),
-        toccup=jnp.array(toccup),
-        species=jnp.concat((species, jnp.array(pol_state)), axis=2),
-    )
-
-
-# ---- MODEL FUNCTION
-
-
-def get_model(example_batch: AtomsData, cfg: ConfigDict, **nl_kwargs):
-    displacement, _ = space.periodic_general(example_batch.cell[0])
-    model = nn.nequip_pol.model_from_config(cfg)
-
-    neighbor = partition.neighbor_list(
-        displacement,
-        example_batch.cell[0],
-        cfg.r_max,  # pyright: ignore
-        format=partition.Sparse,
-        **nl_kwargs,
-    ).allocate(example_batch.positions[0])
-
-    featurizer = nn.util.neighbor_list_featurizer(displacement)
-
-    def init_fn(key: Array, position: Array, cell: Array, atoms: Array):
-        graph = featurizer(atoms, position, neighbor.update(position, box=cell))
-        return model.init(key, graph)
-
-    def apply_fn(params, position, cell, atoms):
-        graph = featurizer(atoms, position, neighbor.update(position, box=cell))
-        energy, magmom = model.apply(params, graph)
-
-        return energy[0, 0], magmom[:-1]  # pyright: ignore
-
-    return init_fn, value_and_grad(apply_fn, argnums=1, has_aux=True)
-
-
-def evaluate_model(params, model: Callable, data: Dataset):
-    mod_e, mod_f, mod_o = [], [], []
-
-    for batch in data:
-        (energy, toccup), forces = model(
-            params,
-            batch.positions,
-            batch.cell,
-            batch.species,
-        )
-
-        mod_e.extend(energy)
-        mod_f.extend(-forces)
-        mod_o.extend(toccup)
-    mod_e, mod_f, mod_o = jnp.array(mod_e), jnp.array(mod_f), jnp.array(mod_o)
-
-    data_e = get_all(data, "energies")
-    data_f = get_all(data, "forces")
-    data_o = get_all(data, "toccup")
-
-    return (
-        jnp.sqrt(jnp.square(mod_e - data_e).mean()),
-        jnp.sqrt(jnp.square(mod_f - data_f).mean()),
-        jnp.sqrt(jnp.square(mod_o - data_o).mean()),
-    )
 
 
 # ---- REAL APPLICATION
@@ -430,6 +275,11 @@ def main():
         f"Initialized model with {sum(x.size for x in tree_util.tree_leaves(params))} parameters"
     )
 
+    apply_fn(params, train[0].positions[0], train[0].cell[0], train[0].species[0])
+    apply_fn(params, train[1].positions[1], train[1].cell[1], train[1].species[1])
+
+    exit(0)
+
     # ---- TRAINING
 
     opt = optax.adam(args.learning_rate)
@@ -481,6 +331,14 @@ def main():
             (loss, e_loss, f_loss, o_loss),
         )
 
+    # Load existing parameters if wanted
+    check_path = os.path.join(args.checkpoints_dir, tag + ".pkl")
+    if args.restart and os.path.isfile(check_path):
+        with open(check_path, "rb") as f:
+            _, params, opt_state = pickle.load(f)
+
+        logging.info(f"Reinitialized the training from checkpoint {check_path}")
+
     # Start training loop
     logging.info("Starting training")
 
@@ -490,21 +348,7 @@ def main():
             logging.info("Too many iterations wihtout improvement, stopping training")
             break
 
-        # Using lax for training set since its usually big
-        # def _func(j, var):
-        #     params, opt_state, train_loss = var
-        #
-        #     params, opt_state, losses = update(params, opt_state, train[j])
-        #
-        #     return params, opt_state, train_loss.at[j].set(losses[0])
-        #
-        # params, opt_state, train_loss = fori_loop(
-        #     0,
-        #     len(train),
-        #     _func,
-        #     (params, opt_state, jnp.zeros(len(train))),
-        # )
-
+        # Train loop and loss
         train_loss = jnp.array([])
         for batch in train:
             params, opt_state, losses = update(params, opt_state, batch)
@@ -519,6 +363,7 @@ def main():
             losses = loss_fn(params, batch)
 
             valid_loss = jnp.append(valid_loss, losses[0])
+
         valid_loss = valid_loss.mean()
 
         logging.info(
@@ -529,8 +374,8 @@ def main():
             lowest_loss = valid_loss
             patience_count = 0
 
-            os.makedirs(args.chekpoints_dir, exist_ok=True)
-            with open(os.path.join(args.chekpoints_dir, tag + ".pkl"), "wb") as f:
+            os.makedirs(args.checkpoints_dir, exist_ok=True)
+            with open(check_path, "wb") as f:
                 pickle.dump([config, params, opt_state], f)
         else:
             patience_count += 1
