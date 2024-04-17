@@ -275,11 +275,6 @@ def main():
         f"Initialized model with {sum(x.size for x in tree_util.tree_leaves(params))} parameters"
     )
 
-    apply_fn(params, train[0].positions[0], train[0].cell[0], train[0].species[0])
-    apply_fn(params, train[1].positions[1], train[1].cell[1], train[1].species[1])
-
-    exit(0)
-
     # ---- TRAINING
 
     opt = optax.adam(args.learning_rate)

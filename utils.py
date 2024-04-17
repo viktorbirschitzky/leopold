@@ -168,7 +168,6 @@ def get_model(example_batch: AtomsData, cfg: ConfigDict, **nl_kwargs):
         return model.init(key, graph)
 
     def apply_fn(params, position, cell, atoms):
-        print(neighbor.update(position, box=cell).idx)
         graph = featurizer(atoms, position, neighbor.update(position, box=cell))
         energy, magmom = model.apply(params, graph)
 
