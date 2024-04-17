@@ -136,7 +136,7 @@ def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
 
         atom.calc = None
 
-        atom.info["energy"] = data.energies[i]
+        atom.info["energy"] = float(data.energies[i])
         atom.arrays["forces"] = data.forces[i]
         atom.arrays["pol_state"] = pol_state
         atom.arrays["toccup"] = data.toccup[i]
