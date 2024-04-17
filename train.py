@@ -59,7 +59,7 @@ def arg_parse() -> Namespace:
     parser.add_argument("--toccup_weight", type=float, default=64**2)
     parser.add_argument("--max_epoch", type=int, default=1000)
     parser.add_argument("--patience", type=int, default=200)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--learning_rate", type=float, default=5e-4)
 
     # General options
     parser.add_argument("--log_level", help="log level", type=str, default="INFO")
@@ -235,12 +235,12 @@ def main():
     # Update the number of atomic species
     config.n_elements = train[0].species.shape[-1]
 
-    # Computing shift and scale for energies
-    config.shift = get_all(train, "energies").mean()
+    # Computing shift and scale for energies per atom
+    config.shift = get_all(train, "energies").mean() / train[0].species.shape[1]
     config.scale = get_all(train, "forces").flatten().std()
 
     logging.info(
-        f"Using an energy scaling and shift of {config.scale:.2f} and {config.shift:.2f}"
+        f"Using a per atom energy scaling and shift of {config.scale:.2f} and {config.shift:.2f}"
     )
 
     # Compute species dependent shift and scale for toccup
@@ -249,8 +249,8 @@ def main():
 
     toccup_shift, toccup_scale = [], []
     for z in species.T[:-1]:
-        toccup_shift.append(toccup[z.T == 1].mean(0))
-        toccup_scale.append(toccup[z.T == 1].std(0))
+        toccup_shift.append([toccup[z.T == 1].mean()])
+        toccup_scale.append([toccup[z.T == 1].std()])
     config.shift_occ = jnp.array(toccup_shift)
     config.scale_occ = jnp.array(toccup_scale)
 
@@ -299,7 +299,7 @@ def main():
             + jnp.square(toccup.sum(-1) - batch.toccup.sum(-1))
             # Difference of occup
             + jnp.square(jnp.diff(toccup, axis=-1) - jnp.diff(batch.toccup, axis=-1))[
-                :, :, 0
+                ..., 0
             ]
         )
 
@@ -379,7 +379,7 @@ def main():
     logging.info("Training complete, evaluating the model")
 
     # Load best parameters
-    with open(os.path.join(args.chekpoints_dir, tag + ".pkl"), "rb") as f:
+    with open(os.path.join(args.checkpoints_dir, tag + ".pkl"), "rb") as f:
         _, params, _ = pickle.load(f)
 
     # Evalutate the model on Train

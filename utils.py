@@ -19,7 +19,7 @@ from ase import Atoms
 from jax import Array
 from ml_collections import ConfigDict
 from typing import Tuple, List, Callable, NamedTuple
-
+from flax.typing import VariableDict
 
 # ---- DATABASE FUNCTIONS
 
@@ -98,7 +98,7 @@ def get_data_from_xyz(file: str) -> AtomsData:
     # Collect all the other informations
     energies, positions, forces, toccup, cell, species = [], [], [], [], [], []
     for atom in atoms:
-        energies.append(atom.get_potential_energy() / len(atom))
+        energies.append(atom.get_potential_energy())
         positions.append(atom.get_scaled_positions())
         forces.append(atom.get_forces())
         cell.append(atom.get_cell().array)
@@ -167,7 +167,7 @@ def get_model(example_batch: AtomsData, cfg: ConfigDict, **nl_kwargs):
         graph = featurizer(atoms, position, neighbor.update(position, box=cell))
         return model.init(key, graph)
 
-    def apply_fn(params, position, cell, atoms):
+    def apply_fn(params: VariableDict, position: Array, cell: Array, atoms: Array):
         graph = featurizer(atoms, position, neighbor.update(position, box=cell))
         energy, magmom = model.apply(params, graph)
 
