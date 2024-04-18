@@ -85,11 +85,7 @@ def shuffle_data(rng: Array, data: AtomsData) -> AtomsData:
     return AtomsData(**dict_data)
 
 
-def get_data_from_xyz(file: str) -> AtomsData:
-    atoms = read(file, index=":", format="extxyz")
-    if not isinstance(atoms, list):
-        atoms = [atoms]
-
+def get_data_from_atoms(atoms: list[Atoms]) -> AtomsData:
     # Informations about the chemical species
     elements = jnp.unique_values(
         jnp.array([z for atom in atoms for z in atom.get_atomic_numbers()])
@@ -120,6 +116,14 @@ def get_data_from_xyz(file: str) -> AtomsData:
         species=jnp.array(species),
         atom_num=jnp.repeat(jnp.array([elements]), len(atoms), axis=0),
     )
+
+
+def get_data_from_xyz(file: str) -> AtomsData:
+    atoms = read(file, index=":", format="extxyz")
+    if not isinstance(atoms, list):
+        atoms = [atoms]
+
+    return get_data_from_atoms(atoms)
 
 
 def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
