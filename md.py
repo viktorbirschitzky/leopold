@@ -29,7 +29,7 @@ from utils import get_model, get_data_from_atoms
 from jax import Array
 from argparse import ArgumentParser, Namespace
 from utils import AtomsData
-from jax_md.simulate import NPTNoseHooverState, NVTNoseHooverState
+from jax_md.simulate import NVTNoseHooverState
 from typing import Union, Optional
 
 
@@ -185,16 +185,17 @@ def main():
     # Create trajectory file
     traj_f = open(os.path.join(args.out_dir, tag) + ".traj", "wb")
 
+    atoms = data.species
     for i in range(args.num_steps):
         # Take a step
-        state, energy, toccup = update(state, data.species[0])
+        state, energy, toccup = update(state, atoms[0])
 
         # Modify Polaron position
         magmom = jnp.diff(toccup, axis=-1)
         pol_state = jnp.argmax(jnp.abs(magmom), axis=0)
 
-        data.species.at[:, -1].set(0)
-        data.species.at[pol_state, -1].set(1)
+        atoms = atoms.at[..., -1].set(0)
+        atoms = atoms.at[:, pol_state, -1].set(1)
 
         # Log results
         if i % args.log_interval == 0:
@@ -213,7 +214,7 @@ def main():
                 data.cell,
                 state.position.reshape((1,) + state.position.shape),
                 state.force.reshape((1,) + state.force.shape),
-                data.species,
+                atoms,
                 toccup.reshape((1,) + toccup.shape),
                 data.atom_num,
             ),
