@@ -125,7 +125,7 @@ def get_data_from_xyz(file: str) -> AtomsData:
 def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
     atoms = []
 
-    for i in range(len(data.species)):
+    for i in range(len(data.energies)):
         symbols, pol_state = data.species[i, :, :-1], data.species[i, :, -1]
         atom = Atoms(
             numbers=jnp.matmul(symbols, data.atom_num[0]),

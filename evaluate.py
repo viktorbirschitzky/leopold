@@ -14,7 +14,7 @@ from jax import jit, vmap
 from ase.io import write
 
 # Utils
-from utils import get_atoms_from_data, get_data_from_xyz, batch_data
+from utils import get_all, get_atoms_from_data, get_data_from_xyz, batch_data
 from utils import get_model
 
 # Types
@@ -78,7 +78,7 @@ def main():
 
     # Real evaluation
     result = dict()
-    for batch in data[:1]:
+    for batch in data:
         (energies, toccup), forces = compiled_vect_model(
             params,
             batch.positions,
@@ -89,7 +89,8 @@ def main():
         for key in ["positions", "cell", "species", "atom_num"]:
             if result.get(key, None) is None:
                 result[key] = batch._asdict()[key]
-            result[key] = jnp.append(result[key], batch._asdict()[key], axis=0)
+            else:
+                result[key] = jnp.append(result[key], batch._asdict()[key], axis=0)
 
         if result.get("energies", None) is None:
             result["energies"] = energies
