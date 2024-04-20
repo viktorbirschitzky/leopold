@@ -2,6 +2,12 @@
 
 # ---- IMPORTS
 
+# Generics
+import os
+
+# Numpy
+import numpy as np
+
 # Jax
 import jax.numpy as jnp
 import jax.random as jrn
@@ -13,6 +19,9 @@ from jax_md import nn, space, partition
 
 # ASE
 from ase.io import read
+
+# Tables
+import tables as tb
 
 # Types
 from ase import Atoms
@@ -148,6 +157,71 @@ def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
         atoms.append(atom)
 
     return atoms
+
+
+# ---- TRAJECTORY FUNCTIONS
+
+
+class TrajectoryWriter:
+    file: tb.File
+
+    data: dict[str, list[Array]] = dict()
+
+    def __init__(
+        self,
+        batch_size: int,
+        description: type,
+        tag: str,
+        out_dir: str = ".",
+        compression_level: int = 5,
+    ):
+        # Save batch size
+        self.__batch_size = batch_size
+        self.__count = 0
+
+        # Read field in description and allocate batch
+        for key, _ in description.__dict__["columns"].items():
+            self.data[key] = []
+
+        # Create directory
+        os.makedirs(out_dir, exist_ok=True)
+
+        # Create file
+        self.file = tb.open_file(
+            os.path.join(out_dir, tag) + ".h5",
+            mode="w",
+            title="MD Trajectory",
+            filters=tb.Filters(complevel=compression_level, complib="zlib"),
+        )
+
+        self.__table = self.file.create_table(
+            self.file.root,
+            "Frames",
+            description=description,
+            title="Simulation frames",
+            expectedrows=5_000_000,
+        )
+
+        self.__frame = self.__table.row
+
+    def __call__(self, **kwarg):
+        for key, item in kwarg.items():
+            self.data[key].append(item)
+        self.__count += 1
+
+        if self.__count == self.__batch_size:
+            data_np = {key: np.asarray(item) for key, item in self.data.items()}
+
+            for i in range(self.__batch_size):
+                for key, item in data_np.items():
+                    self.__frame[key] = item[i]
+                self.__frame.append()
+
+            self.__table.flush()
+            self.__count = 0
+
+    def close(self):
+        self.file.close()
 
 
 # ---- MODEL FUNCTION

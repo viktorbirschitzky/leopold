@@ -22,13 +22,16 @@ from jax_md.quantity import kinetic_energy, temperature
 from ase.io import read
 from ase import units
 
+# Tables
+import tables as tb
+
 # Utils
 from utils import get_model, get_data_from_atoms
 
 # Types
 from jax import Array
 from argparse import ArgumentParser, Namespace
-from utils import AtomsData
+from utils import TrajectoryWriter
 from jax_md.simulate import NVTNoseHooverState
 from typing import Union, Optional
 
@@ -45,13 +48,19 @@ def arg_parse() -> Namespace:
     parser.add_argument("--time_step", type=float, default=1)
     parser.add_argument("--temperature", type=float, default=300)
     parser.add_argument("--num_steps", type=int, default=10_000_000)
+
+    # Logging options
     parser.add_argument("--log_interval", type=int, default=5)
+    parser.add_argument("--log_level", help="log level", type=str, default="INFO")
+
+    # Saving options
+    parser.add_argument("--batch_size", type=int, default=100_000)
+    parser.add_argument("--compression_level", type=int, default=5)
 
     # General options
     parser.add_argument("--name", type=str, default=None)
-    parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--out_dir", type=str, default="md")
-    parser.add_argument("--log_level", help="log level", type=str, default="INFO")
+    parser.add_argument("--seed", type=int, default=123)
     parser.add_argument(
         "--default_dtype", type=str, choices=["float64", "float32"], default="float64"
     )
@@ -101,10 +110,12 @@ def main():
 
     # ---- GENERAL SETTING
 
-    # Getting model tag
+    # Getting model tag and define output path
     tag = os.path.basename(args.model_path).split(".pkl")[0]
     if args.name is not None:
         tag = args.name
+
+    out_path = os.path.join(args.out_dir, tag)
 
     # Default dtype
     if args.default_dtype == "float64":
@@ -116,7 +127,7 @@ def main():
     setup_logger(args.log_level, tag, args.out_dir)
 
     # Add incipit in log file
-    with open(os.path.join(args.out_dir, tag + ".log"), "w") as f:
+    with open(out_path + ".log", "w") as f:
         f.write(
             f"Model: {args.model_path}     dtype: {args.default_dtype}     seed: {args.seed}\n"
         )
@@ -180,12 +191,30 @@ def main():
         atoms=data.species[0],
     )
 
+    # Setup trajectory writer
+    n_atoms = data.positions.shape[1]
+
+    class Frame(tb.IsDescription):
+        energy = tb.Float64Col()
+        temperature = tb.Float64Col()
+        polaron = tb.Float64Col(shape=(n_atoms,))
+        toccups = tb.Float64Col(shape=(n_atoms, 2))
+        positions = tb.Float64Col(shape=(n_atoms, 3))
+        forces = tb.Float64Col(shape=(n_atoms, 3))
+
+    writer = TrajectoryWriter(
+        args.batch_size, Frame, tag, args.out_dir, args.compression_level
+    )
+
+    # Save the unit cell of the system
+    writer.file.create_array("/", "Cell", data.cell[0].__array__())
+
     # ---- RUN SIMULATION
 
-    # Create trajectory file
-    traj_f = open(os.path.join(args.out_dir, tag) + ".traj", "wb")
-
+    # Starting species
     atoms = data.species
+
+    # Loop
     for i in range(args.num_steps):
         # Take a step
         state, energy, toccup = update(state, atoms[0])
@@ -197,31 +226,30 @@ def main():
         atoms = atoms.at[..., -1].set(0)
         atoms = atoms.at[:, pol_state, -1].set(1)
 
+        # Compute interesting quantites
+        temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
+
+        # Save data
+        writer(
+            energy=energy,
+            temperature=temp,
+            polaron=atoms[..., -1],
+            toccups=toccup,
+            positions=state.position,
+            forces=state.force,
+        )
+
         # Log results
         if i % args.log_interval == 0:
             logging.info(
                 f"{i*args.time_step*1e-3:13.3f} "
                 f"{kinetic_energy(velocity=state.velocity, mass=state.mass) + energy:12.3f} "
                 f"{energy:12.3f} "
-                f"{temperature(velocity=state.velocity, mass=state.mass) / units.kB:12.3f} "
+                f"{temp:12.3f} "
                 f"{pol_state[0]:14d} {magmom[pol_state].flatten()[0]:17.3f}"
             )
 
-        # Write inside trajectory
-        pickle.dump(
-            AtomsData(
-                jnp.array([energy]),
-                data.cell,
-                state.position.reshape((1,) + state.position.shape),
-                state.force.reshape((1,) + state.force.shape),
-                atoms,
-                toccup.reshape((1,) + toccup.shape),
-                data.atom_num,
-            ),
-            traj_f,
-        )
-
-    traj_f.close()
+    writer.close()
 
 
 if __name__ == "__main__":
