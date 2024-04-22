@@ -208,6 +208,9 @@ class TrajectoryWriter:
             self.__table.flush()
             self.__count = 0
 
+    def flush(self):
+        self.__table.flush()
+
     def close(self):
         self.file.close()
 
