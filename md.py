@@ -255,6 +255,10 @@ def main():
                 f"{pol_state[-2]:15d} {magmom[pol_state[-2]].flatten()[0]:17.3f}"
             )
 
+    # Flush unwritten data
+    writer.flush()
+
+    # Close trajectory file
     writer.close()
 
 
