@@ -14,6 +14,9 @@ from jax import value_and_grad
 # Jax MD
 from jax_md import nn, space, partition
 
+# Leopold
+from leopold import model_from_config
+
 # ASE
 from ase.io import read
 
@@ -224,7 +227,7 @@ class TrajectoryWriter:
 
 def get_model(example_batch: AtomsData, cfg: ConfigDict, **nl_kwargs):
     displacement, _ = space.periodic_general(example_batch.cell[0])
-    model = nn.nequip_pol.model_from_config(cfg)
+    model = model_from_config(cfg)
 
     neighbor = partition.neighbor_list(
         displacement,
