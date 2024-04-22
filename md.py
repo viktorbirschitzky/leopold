@@ -135,7 +135,8 @@ def main():
         f.write(
             f"{'Date':<10s} {'Real Time':<10s} {'MD Time[ps]':>12s} "
             f"{'Etot[eV]':>12s} {'Epot[eV]':>12s} {'Temp[K]':>12s} "
-            f"{'Polaron[idx]':>14s} {'Pol. Mag.[a.u.]':>17s}\n"
+            f"{'Polaron[idx]':>14s} {'Pol. Mag.[a.u.]':>17s} "
+            f"{'2˚ Pol.[idx]':>14s} {'2˚ Mag.[a.u.]':>17s}\n"
         )
 
     # ---- DATA READING
@@ -219,12 +220,16 @@ def main():
         # Take a step
         state, energy, toccup = update(state, atoms[0])
 
+        # Control if run is stable
+        if jnp.isnan(energy):
+            break
+
         # Modify Polaron position
         magmom = jnp.diff(toccup, axis=-1)
-        pol_state = jnp.argmax(jnp.abs(magmom), axis=0)
+        pol_state = jnp.argsort(jnp.abs(magmom), axis=0).flatten()
 
         atoms = atoms.at[..., -1].set(0)
-        atoms = atoms.at[:, pol_state, -1].set(1)
+        atoms = atoms.at[:, pol_state[-1], -1].set(1)
 
         # Compute interesting quantites
         temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
@@ -246,7 +251,8 @@ def main():
                 f"{kinetic_energy(velocity=state.velocity, mass=state.mass) + energy:12.3f} "
                 f"{energy:12.3f} "
                 f"{temp:12.3f} "
-                f"{pol_state[0]:14d} {magmom[pol_state].flatten()[0]:17.3f}"
+                f"{pol_state[-1]:14d} {magmom[pol_state[-1]].flatten()[0]:17.3f}"
+                f"{pol_state[-2]:15d} {magmom[pol_state[-2]].flatten()[0]:17.3f}"
             )
 
     writer.close()

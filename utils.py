@@ -5,9 +5,6 @@
 # Generics
 import os
 
-# Numpy
-import numpy as np
-
 # Jax
 import jax.numpy as jnp
 import jax.random as jrn
@@ -165,8 +162,6 @@ def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
 class TrajectoryWriter:
     file: tb.File
 
-    data: dict[str, list[Array]] = dict()
-
     def __init__(
         self,
         batch_size: int,
@@ -179,24 +174,23 @@ class TrajectoryWriter:
         self.__batch_size = batch_size
         self.__count = 0
 
-        # Read field in description and allocate batch
-        for key, _ in description.__dict__["columns"].items():
-            self.data[key] = []
-
         # Create directory
         os.makedirs(out_dir, exist_ok=True)
+
+        # Create Filter
+        self.__filter = tb.Filters(complevel=compression_level, complib="zlib")
 
         # Create file
         self.file = tb.open_file(
             os.path.join(out_dir, tag) + ".h5",
             mode="w",
             title="MD Trajectory",
-            filters=tb.Filters(complevel=compression_level, complib="zlib"),
+            filters=self.__filter,
         )
 
         self.__table = self.file.create_table(
             self.file.root,
-            "Frames",
+            "frames",
             description=description,
             title="Simulation frames",
             expectedrows=5_000_000,
@@ -206,17 +200,11 @@ class TrajectoryWriter:
 
     def __call__(self, **kwarg):
         for key, item in kwarg.items():
-            self.data[key].append(item)
+            self.__frame[key] = item
+        self.__frame.append()
         self.__count += 1
 
         if self.__count == self.__batch_size:
-            data_np = {key: np.asarray(item) for key, item in self.data.items()}
-
-            for i in range(self.__batch_size):
-                for key, item in data_np.items():
-                    self.__frame[key] = item[i]
-                self.__frame.append()
-
             self.__table.flush()
             self.__count = 0
 
@@ -237,7 +225,7 @@ def get_model(example_batch: AtomsData, cfg: ConfigDict, **nl_kwargs):
         cfg.r_max,  # pyright: ignore
         format=partition.Sparse,
         **nl_kwargs,
-    ).allocate(example_batch.positions[0])
+    ).allocate(example_batch.positions[0])  # pyright: ignore
 
     featurizer = nn.util.neighbor_list_featurizer(displacement)
 
