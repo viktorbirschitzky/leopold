@@ -55,6 +55,10 @@ def batch_data(data: AtomsData, batch_size: int) -> Dataset:
     data_dict = data._asdict()
     n_batch = 1 + (len(data.species) // batch_size)
 
+    # Avoid create an empty batch
+    if len(data.species) % batch_size == 0:
+        n_batch -= 1
+
     batched_data = [dict() for _ in range(n_batch)]
     for key in data_dict.keys():
         vals = jnp.split(
