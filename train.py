@@ -77,7 +77,7 @@ def default_config() -> ConfigDict:
     config.nonlinearities = {"e": "raw_swish", "o": "tanh"}
     config.use_sc = True
     config.n_elements = 3
-    config.hidden_irreps = "32x0e + 4x1e"
+    config.hidden_irreps = "42x0e + 8x1e"
     config.sh_irreps = "1x0e + 1x1e"
     config.num_basis = 8
     config.r_max = 5.0
