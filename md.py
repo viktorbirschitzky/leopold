@@ -208,7 +208,17 @@ def main():
     )
 
     # Save the unit cell of the system
-    writer.file.create_array("/", "Cell", data.cell[0].__array__())
+    writer.file.create_array(
+        "/", "cell", data.cell[0].__array__(), title="Simulation unit cell"
+    )
+
+    # Save species informations
+    writer.file.create_array(
+        "/",
+        "species",
+        jnp.matmul(data.species[0, :, :-1], data.atom_num[0]).__array__(),
+        title="Atomic numbers of the simulation's atoms",
+    )
 
     # ---- RUN SIMULATION
 
