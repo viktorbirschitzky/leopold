@@ -14,7 +14,7 @@ from jax import jit, vmap
 from ase.io import write
 
 # Utils
-from utils import get_all, get_atoms_from_data, get_data_from_xyz, batch_data
+from utils import get_atoms_from_data, get_data_from_xyz, batch_data
 from utils import get_model
 
 # Types

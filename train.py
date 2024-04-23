@@ -41,7 +41,7 @@ def arg_parse() -> Namespace:
     parser.add_argument("--batch_size", type=int, default=20)
 
     # Directory informations
-    parser.add_argument("--name", type=str, default="POL_DYN")
+    parser.add_argument("--name", type=str, default="LEOPOLD")
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--results_dir", type=str, default="results")
     parser.add_argument("--checkpoints_dir", type=str, default="checkpoints")
