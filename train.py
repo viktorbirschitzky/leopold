@@ -55,8 +55,8 @@ def arg_parse() -> Namespace:
 
     # Train specifics
     parser.add_argument("--energy_weight", type=float, default=1.0)
-    parser.add_argument("--forces_weight", type=float, default=64**2)
-    parser.add_argument("--toccup_weight", type=float, default=64**2)
+    parser.add_argument("--forces_weight", type=float, default=None)
+    parser.add_argument("--toccup_weight", type=float, default=None)
     parser.add_argument("--max_epoch", type=int, default=1000)
     parser.add_argument("--patience", type=int, default=200)
     parser.add_argument("--learning_rate", type=float, default=5e-4)
@@ -279,6 +279,13 @@ def main():
 
     opt = optax.adam(args.learning_rate)
     opt_state = opt.init(params)
+
+    # Set the weight for forces and toccup
+    if args.forces_weight is None:
+        args.forces_weight = train[0].species.shape[-2] ** 2
+
+    if args.toccup_weight is None:
+        args.toccup_weight = train[0].species.shape[-2] ** 2
 
     # Define the loss function
     @jit
