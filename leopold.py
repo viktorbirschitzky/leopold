@@ -88,6 +88,8 @@ class NequIPEnergyModel(nn.Module):
     n_neighbors: float = 1.0
     scalar_mlp_std: float = 4.0
 
+    learn_energy: bool = True
+
     def __post_init__(self):
         super().__post_init__()
         if self.shift_occ is None:
@@ -148,7 +150,12 @@ class NequIPEnergyModel(nn.Module):
         atomic_output = nequip.Linear(irreps_out=final_irreps)(h_node_en).array
 
         # shift + scale atomic energies
-        atomic_output = self.scale * atomic_output + self.shift
+        scale, shift = self.scale, self.shift
+        if self.learn_energy:
+            scale = self.param("energy_scale", lambda _: self.scale)
+            shift = self.param("energy_shift", lambda _: self.shift)
+
+        atomic_output = scale * atomic_output + shift
 
         # this aggregation follows jraph/_src/models.py
         n_graph = graph.n_node.shape[0]
@@ -190,6 +197,10 @@ def model_from_config(cfg: ConfigDict) -> NequIPEnergyModel:
     else:
         raise ValueError
 
+    learn_energy = False
+    if hasattr(cfg, "learn_energy"):
+        learn_energy = cfg.learn_energy
+
     model = NequIPEnergyModel(
         graph_net_steps=cfg.graph_net_steps,
         use_sc=cfg.use_sc,
@@ -208,6 +219,7 @@ def model_from_config(cfg: ConfigDict) -> NequIPEnergyModel:
         scale_occ=cfg.scale_occ,
         n_neighbors=cfg.n_neighbors,
         scalar_mlp_std=cfg.scalar_mlp_std,
+        learn_energy=learn_energy,
     )
 
     return model
