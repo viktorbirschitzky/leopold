@@ -4,6 +4,7 @@
 
 # Generics
 import os
+import warnings
 import pickle
 
 # Math
@@ -16,7 +17,7 @@ from jax import jit, vmap
 import tables as tb
 
 # Utils
-from utils import batch_data, get_data_from_hdf5, get_model
+from utils import batch_data, get_data_from_hdf5, get_model, get_all
 
 # Types
 from argparse import ArgumentParser, Namespace
@@ -62,6 +63,9 @@ def main():
     args = arg_parse()
 
     # ---- GENERAL SETTINGS
+
+    # Warnings annoies me
+    warnings.simplefilter("ignore")
 
     # Construct the name tag
     tag = os.path.basename(args.data_path).split("-")[0]
@@ -111,7 +115,15 @@ def main():
     # Create a table for every model
     print("Reading models: ", end="")
 
-    models, tables = [], []
+    models, tables, keys = [], [], []
+
+    # Start from the one used to generate the trajectory
+    keys.append(os.path.basename(args.data_path).split("-")[-1].split(".")[0])
+    tables.append(
+        output.create_table("/", f"m{keys[-1]}", Frame, title=f"Model {keys[-1]}")
+    )
+
+    # Take all the others
     for model in args.models_path:
         """
         In our experiments the models were uniquelly identified by their seed,
@@ -123,7 +135,14 @@ def main():
 
         # Collect model seed
         key = os.path.basename(model).split("-")[-1].split(".")[0]
-        tables.append(output.create_table("/", key, Frame, title=f"Model {key}"))
+
+        if key in keys:
+            continue
+        else:
+            keys.append(key)
+
+        # Create table
+        tables.append(output.create_table("/", f"m{key}", Frame, title=f"Model {key}"))
 
         # Save model
         _, apply_fn = get_model(
@@ -146,9 +165,9 @@ def main():
 
     for i in range(nChunk + 1):
         print(f"\nEvaluate chunk {i:>3d}:")
-        for i, (model, table) in enumerate(zip(models, tables)):
+        for model, table, key in zip(models, tables[1:], keys[1:]):
             frame = table.row
-            for batch in tqdm(data, desc=f"Model {i}"):
+            for batch in tqdm(data, desc=f"Model {key}"):
                 (energies, toccup), forces = model(
                     batch.positions,
                     batch.cell,
@@ -163,6 +182,18 @@ def main():
                     frame.append()
 
             table.flush()
+
+        # Save the data of the model used for MD
+        frame = tables[0].row
+        for e, o, f in zip(
+            get_all(data, "energies"), get_all(data, "toccup"), get_all(data, "forces")
+        ):
+            frame["energy"] = e
+            frame["toccup"] = o
+            frame["forces"] = -f
+
+            frame.append()
+        tables[-1].flush()
 
         # Read next chunk
         if i != nChunk:
