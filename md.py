@@ -196,12 +196,12 @@ def main():
     n_atoms = data.positions.shape[1]
 
     class Frame(tb.IsDescription):
-        energy = tb.Float64Col()
-        temperature = tb.Float64Col()
-        polaron = tb.Float64Col(shape=(n_atoms,))
-        toccups = tb.Float64Col(shape=(n_atoms, 2))
-        positions = tb.Float64Col(shape=(n_atoms, 3))
-        forces = tb.Float64Col(shape=(n_atoms, 3))
+        energy = tb.Float32Col(pos=0)
+        temperature = tb.Float32Col(pos=1)
+        polaron = tb.Float32Col(shape=(n_atoms,), pos=2)
+        toccups = tb.Float32Col(shape=(n_atoms, 2), pos=3)
+        positions = tb.Float32Col(shape=(n_atoms, 3), pos=4)
+        forces = tb.Float32Col(shape=(n_atoms, 3), pos=5)
 
     writer = TrajectoryWriter(
         args.batch_size, Frame, tag, args.out_dir, args.compression_level

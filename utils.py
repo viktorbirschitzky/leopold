@@ -5,6 +5,9 @@
 # Generics
 import os
 
+# Numpy
+import numpy as np
+
 # Jax
 import jax.numpy as jnp
 import jax.random as jrn
@@ -27,7 +30,8 @@ import tables as tb
 from ase import Atoms
 from jax import Array
 from ml_collections import ConfigDict
-from typing import Tuple, List, Callable, NamedTuple
+from typing import Tuple, List, Callable, NamedTuple, Union
+from tables import File
 from flax.typing import VariableDict
 
 # ---- DATABASE FUNCTIONS
@@ -131,12 +135,58 @@ def get_data_from_atoms(atoms: list[Atoms]) -> AtomsData:
     )
 
 
-def get_data_from_xyz(file: str) -> AtomsData:
-    atoms = read(file, index=":", format="extxyz")
+def get_data_from_xyz(
+    file: str, beg: int = 0, end: int = -1, step: int = 1
+) -> AtomsData:
+    atoms = read(
+        file, index=f"{beg}:{end if end != -1 else ''}:{step}", format="extxyz"
+    )
     if not isinstance(atoms, list):
         atoms = [atoms]
 
     return get_data_from_atoms(atoms)
+
+
+def get_data_from_hdf5(
+    file: Union[str, File], beg: int = 0, end: int = -1, step: int = 1
+) -> AtomsData:
+    close: bool = False
+
+    if isinstance(file, str):
+        file, close = tb.open_file(file), True
+
+    # First read cell
+    cell = file.root.cell.read()
+
+    # Read species
+    species = file.root.species.read()
+    atom_num = np.unique(species)
+
+    # number of atoms
+    natoms = len(species)
+
+    # HotOnes encoding
+    species = np.where(species.reshape(natoms, 1) == atom_num, 1, 0)
+
+    data = {key: [] for key in AtomsData._fields}
+    for frame in file.root.frames.iterrows(beg, end, step):
+        data["positions"].append(frame["positions"])
+        data["cell"].append(cell)
+        data["energies"].append(frame["energy"])
+        data["forces"].append(frame["forces"])
+        data["toccup"].append(frame["toccups"])
+        data["species"].append(
+            np.append(species, frame["polaron"].reshape(natoms, 1), axis=1)
+        )
+        data["atom_num"].append(atom_num)
+
+    data = {key: jnp.array(val) for key, val in data.items()}
+
+    # Close file
+    if close:
+        file.close()
+
+    return AtomsData(**data)
 
 
 def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
