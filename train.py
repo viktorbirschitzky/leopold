@@ -66,6 +66,11 @@ def arg_parse() -> Namespace:
     parser.add_argument(
         "--restart", help="restart from existing checkpoint", action="store_true"
     )
+    parser.add_argument(
+        "--reset_opt",
+        help="doesn't load opt state in restart if present",
+        action="store_true",
+    )
 
     return parser.parse_args()
 
@@ -334,15 +339,24 @@ def main():
         )
 
     # Load existing parameters if wanted
-    check_path = os.path.join(args.checkpoints_dir, tag + ".pkl")
-    if args.restart and os.path.isfile(check_path):
-        with open(check_path, "rb") as f:
-            _, params, opt_state = pickle.load(f)
+    # TODO: Aloowing for selection of checkpoint, probably by simply adding an
+    # argument that defines a string to sum when you open the file
+    check_path = os.path.join(args.checkpoints_dir, tag)
+    if args.restart and os.path.isfile(check_path + ".pkl"):
+        with open(check_path + ".pkl", "rb") as f:
+            if not args.reset_opt:
+                _, params, opt_state = pickle.load(f)
+            else:
+                _, params, _ = pickle.load(f)
 
         logging.info(f"Reinitialized the training from checkpoint {check_path}")
 
     # Start training loop
     logging.info("Starting training")
+
+    logging.info(
+        f"{'Total':>32s} {'Energy':>10s} {'Forces':>10s} {'Toccup':>10s}  {'Total':>23s} {'Energy':>10s} {'Forces':>10s} {'Toccup':>10s}"
+    )
 
     lowest_loss, patience_count = jnp.inf, 0
     for i in range(args.max_epoch):
@@ -351,33 +365,58 @@ def main():
             break
 
         # Train loop and loss
-        train_loss = jnp.array([])
+        train_loss = {
+            "total": jnp.array([]),
+            "energy": jnp.array([]),
+            "force": jnp.array([]),
+            "toccup": jnp.array([]),
+        }
         for batch in train:
             params, opt_state, losses = update(params, opt_state, batch)
 
-            train_loss = jnp.append(train_loss, losses[0])
+            for key, loss in zip(train_loss.keys(), losses):
+                train_loss[key] = jnp.append(train_loss[key], loss)
 
-        train_loss = train_loss.mean()
+        for key in train_loss.keys():
+            train_loss[key] = train_loss[key].mean()
 
         # Validation loss
-        valid_loss = jnp.array([])
+        valid_loss = {
+            "total": jnp.array([]),
+            "energy": jnp.array([]),
+            "force": jnp.array([]),
+            "toccup": jnp.array([]),
+        }
         for batch in eval:
             losses = loss_fn(params, batch)
 
-            valid_loss = jnp.append(valid_loss, losses[0])
+            # Flatten the tuple
+            losses = (losses[0], losses[1][0], losses[1][1], losses[1][2])
 
-        valid_loss = valid_loss.mean()
+            for key, loss in zip(valid_loss.keys(), losses):
+                valid_loss[key] = jnp.append(valid_loss[key], loss)
 
-        logging.info(
-            f"Epoch {i:4} ==> Train Loss: {train_loss:9.4f}  Validation Loss: {valid_loss:9.4f}"
-        )
+        for key in valid_loss.keys():
+            valid_loss[key] = valid_loss[key].mean()
 
-        if valid_loss < lowest_loss:
-            lowest_loss = valid_loss
+        # Loss logging
+        train_log, valid_log = "", ""
+        for (key, tval), (_, vval) in zip(train_loss.items(), valid_loss.items()):
+            train_log += f"{tval:10.4f} "
+            valid_log += f"{vval:10.4f} "
+
+        logging.info(f"Epoch {i:4} ==> Train: {train_log}   Validation:{valid_log}")
+
+        # Saving checkpoints
+        os.makedirs(args.checkpoints_dir, exist_ok=True)
+        with open(check_path + "L.pkl", "wb") as f:
+            pickle.dump([config, params, opt_state], f)
+
+        if valid_loss["total"] < lowest_loss:
+            lowest_loss = valid_loss["total"]
             patience_count = 0
 
-            os.makedirs(args.checkpoints_dir, exist_ok=True)
-            with open(check_path, "wb") as f:
+            with open(check_path + ".pkl", "wb") as f:
                 pickle.dump([config, params, opt_state], f)
         else:
             patience_count += 1
