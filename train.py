@@ -355,7 +355,7 @@ def main():
     logging.info("Starting training")
 
     logging.info(
-        f"{'Total':>32s} {'Energy':>10s} {'Forces':>10s} {'Toccup':>10s}  {'Total':>23s} {'Energy':>10s} {'Forces':>10s} {'Toccup':>10s}"
+        f"{'Total':>35s} {'Energy':>12s} {'Forces':>12s} {'Toccup':>12s}  {'Total':>27s} {'Energy':>12s} {'Forces':>12s} {'Toccup':>12s}"
     )
 
     lowest_loss, patience_count = jnp.inf, 0
@@ -402,10 +402,10 @@ def main():
         # Loss logging
         train_log, valid_log = "", ""
         for (key, tval), (_, vval) in zip(train_loss.items(), valid_loss.items()):
-            train_log += f"{tval:10.4f} "
-            valid_log += f"{vval:10.4f} "
+            train_log += f"{tval:12.8f} "
+            valid_log += f"{vval:12.8f} "
 
-        logging.info(f"Epoch {i:4} ==> Train: {train_log}   Validation:{valid_log}")
+        logging.info(f"Epoch {i:4} ==> Train: {train_log}   Validation: {valid_log}")
 
         # Saving checkpoints
         os.makedirs(args.checkpoints_dir, exist_ok=True)
