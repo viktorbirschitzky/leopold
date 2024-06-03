@@ -303,7 +303,7 @@ def main():
         )
 
         e_loss = jnp.square(energy - batch.energies).mean()
-        f_loss = jnp.square(forces + batch.forces).sum(-1).mean()
+        f_loss = jnp.square(forces + batch.forces).mean()
         o_loss = jnp.mean(
             # Normal value
             jnp.square(toccup - batch.toccup).sum(-1)
