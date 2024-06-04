@@ -236,10 +236,10 @@ def main():
 
         # Modify Polaron position
         magmom = jnp.diff(toccup, axis=-1)
-        pol_state = jnp.argsort(jnp.abs(magmom), axis=0).flatten()
+        pol_state = jnp.argsort(magmom, axis=0).flatten()
 
         atoms = atoms.at[..., -1].set(0)
-        atoms = atoms.at[:, pol_state[-1], -1].set(1)
+        atoms = atoms.at[:, pol_state[0], -1].set(1)
 
         # Compute interesting quantites
         temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
@@ -261,8 +261,8 @@ def main():
                 f"{kinetic_energy(velocity=state.velocity, mass=state.mass) + energy:12.3f} "
                 f"{energy:12.3f} "
                 f"{temp:12.3f} "
-                f"{pol_state[-1]:14d} {magmom[pol_state[-1]].flatten()[0]:17.3f}"
-                f"{pol_state[-2]:15d} {magmom[pol_state[-2]].flatten()[0]:17.3f}"
+                f"{pol_state[0]:14d} {magmom[pol_state[0]].flatten()[0]:17.3f}"
+                f"{pol_state[1]:15d} {magmom[pol_state[1]].flatten()[0]:17.3f}"
             )
 
     # Flush unwritten data
