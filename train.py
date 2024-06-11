@@ -299,7 +299,9 @@ def main():
 
     opt = optax.chain(
         optax.adam(args.learning_rate),
-        optax.contrib.reduce_on_plateau(),  # Use the learning rate from the scheduler.
+        optax.contrib.reduce_on_plateau(
+            0.5, 50, accumulation_size=200
+        ),  # Use the learning rate from the scheduler.
     )
 
     opt_state = opt.init(params)
