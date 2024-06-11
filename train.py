@@ -20,7 +20,7 @@ import optax
 
 # Utils
 from utils import get_data_from_xyz, shuffle_data, get_all, batch_data, split_data
-from utils import get_model, evaluate_model
+from utils import get_model, evaluate_model, get_average_num_neighbour
 
 # Types
 from ml_collections import ConfigDict
@@ -240,6 +240,21 @@ def main():
     # Update the number of atomic species
     config.n_elements = train[0].species.shape[-1]
 
+    # Compute average number of neighbors
+    posis = get_all(train, "positions")
+
+    config.n_neighbors = float(
+        jnp.mean(
+            vmap(get_average_num_neighbour, (None, 0, None))(
+                train[0].cell[0], posis, config.r_max
+            )
+        )
+    )
+
+    logging.info(
+        f"The average number of neighbors in the dataset is {config.n_neighbors:.2f}"
+    )
+
     # Computing shift and scale for energies per atom
     config.shift = get_all(train, "energies").mean() / train[0].species.shape[1]
     config.scale = get_all(train, "forces").flatten().std()
@@ -282,7 +297,11 @@ def main():
 
     # ---- TRAINING
 
-    opt = optax.adam(args.learning_rate)
+    opt = optax.chain(
+        optax.adam(args.learning_rate),
+        optax.contrib.reduce_on_plateau(),  # Use the learning rate from the scheduler.
+    )
+
     opt_state = opt.init(params)
 
     # Set the weight for forces and toccup
@@ -330,7 +349,9 @@ def main():
 
         (loss, (e_loss, f_loss, o_loss)), params_grad = grad_fn(params, batch)
 
-        updates, opt_state = opt.update(params_grad, opt_state)
+        updates, opt_state = opt.update(
+            params_grad, opt_state, params, value=jnp.float32(loss)
+        )
 
         return (
             optax.apply_updates(params, updates),

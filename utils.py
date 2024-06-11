@@ -12,7 +12,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax.random as jrn
 
-from jax import value_and_grad
+from jax import value_and_grad, vmap
 
 # Jax MD
 from jax_md import nn, space, partition
@@ -211,6 +211,15 @@ def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
         atoms.append(atom)
 
     return atoms
+
+
+def get_average_num_neighbour(cell: Array, positions: Array, r_max) -> float:
+    distance, _ = space.periodic_general(cell)
+
+    dist_matrix = vmap(vmap(distance, (None, 0)), (0, None))(positions, positions)
+    dist_matrix = jnp.linalg.norm(dist_matrix, axis=-1)
+
+    return (dist_matrix < r_max).sum() / len(positions) - 1
 
 
 # ---- TRAJECTORY FUNCTIONS
