@@ -243,13 +243,16 @@ def main():
     # Compute average number of neighbors
     posis = get_all(train, "positions")
 
+    avg_neighbors = []
+
+    for p in posis:
+        avg_neighbors.append(get_average_num_neighbour(train[0].cell[0], p, config.r_max))
+
     config.n_neighbors = float(
         jnp.mean(
-            vmap(get_average_num_neighbour, (None, 0, None))(
-                train[0].cell[0], posis, config.r_max
+            jnp.array(avg_neighbors)
             )
         )
-    )
 
     logging.info(
         f"The average number of neighbors in the dataset is {config.n_neighbors:.2f}"
@@ -269,8 +272,10 @@ def main():
 
     toccup_shift, toccup_scale = [], []
     for z in species.T[:-1]:
-        toccup_shift.append([toccup[z.T == 1].mean()])
-        toccup_scale.append([toccup[z.T == 1].std()])
+        #toccup_shift.append([toccup[z.T == 1].mean()])
+        toccup_shift.append([toccup[z.T == 1].min()])
+        #toccup_scale.append([toccup[z.T == 1].std()])
+        toccup_scale.append([toccup[z.T == 1].max() - toccup[z.T == 1].min()])
     config.shift_occ = jnp.array(toccup_shift)
     config.scale_occ = jnp.array(toccup_scale)
 

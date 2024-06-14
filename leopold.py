@@ -11,6 +11,7 @@ import flax.linen as nn
 # Jax
 import jax.numpy as jnp
 from jax import tree_util, tree_map
+from jax.nn import sigmoid
 
 # Jraph
 from jraph import segment_sum
@@ -179,7 +180,7 @@ class NequIPEnergyModel(nn.Module):
         scale_occ = jnp.matmul(graph.nodes[:, :-1], self.scale_occ)
         shift_occ = jnp.matmul(graph.nodes[:, :-1], self.shift_occ)
 
-        magnetizations = scale_occ * magnetizations + shift_occ
+        magnetizations = scale_occ * sigmoid(magnetizations) + shift_occ
 
         return global_output, magnetizations
 
