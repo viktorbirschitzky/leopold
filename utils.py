@@ -50,6 +50,14 @@ class AtomsData(NamedTuple):
 Dataset = List[AtomsData]
 
 
+def apply_transform(data: AtomsData, key: str, fun: Callable) -> AtomsData:
+    data_dict = data._asdict()
+
+    data_dict[key] = fun(data_dict[key])
+
+    return AtomsData(**data_dict)
+
+
 def get_all(batch: Dataset, key: str) -> Array:
     val = []
     for data in batch:

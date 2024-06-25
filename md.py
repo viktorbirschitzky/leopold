@@ -235,7 +235,10 @@ def main():
             break
 
         # Modify Polaron position
-        magmom = jnp.diff(toccup, axis=-1)
+        if not config.predict_magmom:
+            magmom = jnp.diff(toccup, axis=-1)
+        else:
+            magmom = toccup[:, 0:1]
         pol_state = jnp.argsort(magmom, axis=0).flatten()
 
         atoms = atoms.at[..., -1].set(0)

@@ -20,7 +20,7 @@ import optax
 
 # Utils
 from utils import get_data_from_xyz, shuffle_data, get_all, batch_data, split_data
-from utils import get_model, evaluate_model, get_average_num_neighbour
+from utils import get_model, evaluate_model, get_average_num_neighbour, apply_transform
 
 # Types
 from ml_collections import ConfigDict
@@ -52,6 +52,7 @@ def arg_parse() -> Namespace:
     parser.add_argument(
         "--default_dtype", type=str, choices=["float64", "float32"], default="float64"
     )
+    parser.add_argument("--predict_magmom", action="store_true")
 
     # Train specifics
     parser.add_argument("--energy_weight", type=float, default=1.0)
@@ -179,12 +180,6 @@ def main():
         logging.info(f"Created train set with {len(train.species)} configurations")
         logging.info(f"Created validation set with {len(eval.species)} configurations")
 
-        # Batching the data
-        train, eval = (
-            batch_data(train, args.batch_size),
-            batch_data(eval, args.batch_size),
-        )
-
         # No test is given
         logging.info("No data for testing were given")
         test = None
@@ -209,10 +204,6 @@ def main():
             f"Loaded {len(test.species)} configurations from {args.database[1]} used for testing"
         )
 
-        # Batching the data
-        train = batch_data(train, args.batch_size)
-        eval = batch_data(eval, args.batch_size)
-        test = batch_data(test, args.batch_size)
     # Training set, Validation set and Test set are given
     else:
         # Read every file as a different set
@@ -230,9 +221,25 @@ def main():
             f"Loaded {len(test.species)} configurations from {args.database[2]} used for testing"
         )
 
-        # Batching the data
-        train = batch_data(train, args.batch_size)
-        eval = batch_data(eval, args.batch_size)
+    # If direct prediction of Magnetization is requested modify data
+    if args.predict_magmom:
+        logging.info("Magnetization will be predicted directly!")
+
+        def _fun(toccup):
+            return jnp.dstack((jnp.diff(toccup, axis=-1)[..., 0], toccup.sum(-1)))
+
+        train = apply_transform(train, "toccup", _fun)
+        eval = apply_transform(eval, "toccup", _fun)
+        if test is not None:
+            test = apply_transform(eval, "toccup", _fun)
+
+    # Save predict_magmom in configuration
+    config.predict_magmom = args.predict_magmom
+
+    # Batching
+    train = batch_data(train, args.batch_size)
+    eval = batch_data(eval, args.batch_size)
+    if test is not None:
         test = batch_data(test, args.batch_size)
 
     # ---- MODEL CONSTRUCTION
@@ -246,13 +253,11 @@ def main():
     avg_neighbors = []
 
     for p in posis:
-        avg_neighbors.append(get_average_num_neighbour(train[0].cell[0], p, config.r_max))
-
-    config.n_neighbors = float(
-        jnp.mean(
-            jnp.array(avg_neighbors)
-            )
+        avg_neighbors.append(
+            get_average_num_neighbour(train[0].cell[0], p, config.r_max)
         )
+
+    config.n_neighbors = float(jnp.mean(jnp.array(avg_neighbors)))
 
     logging.info(
         f"The average number of neighbors in the dataset is {config.n_neighbors:.2f}"
@@ -272,12 +277,17 @@ def main():
 
     toccup_shift, toccup_scale = [], []
     for z in species.T[:-1]:
-        #toccup_shift.append([toccup[z.T == 1].mean()])
-        toccup_shift.append([toccup[z.T == 1].min()])
-        #toccup_scale.append([toccup[z.T == 1].std()])
-        toccup_scale.append([toccup[z.T == 1].max() - toccup[z.T == 1].min()])
-    config.shift_occ = jnp.array(toccup_shift)
-    config.scale_occ = jnp.array(toccup_scale)
+        # INFO: Old version without sigmoid
+        # toccup_shift.append([toccup[z.T == 1].mean()])
+        # toccup_scale.append([toccup[z.T == 1].std()])
+
+        # INFO: Sigmoid range of work [min + sigmoid * (max - min)]
+        toccup_shift.append(toccup[z.T == 1].min(0))
+        toccup_scale.append(toccup[z.T == 1].max(0) - toccup[z.T == 1].min(0))
+
+    # INFO: Increase the range of actio a little
+    config.scale_occ = jnp.array(toccup_scale) + 0.2
+    config.shift_occ = jnp.array(toccup_shift) - 0.1
 
     logging.info("Using species-dependent occupation matrix scaling and shift:")
     for i, (scale, shift) in enumerate(zip(toccup_scale, toccup_shift)):
@@ -305,7 +315,7 @@ def main():
     opt = optax.chain(
         optax.adam(args.learning_rate),
         optax.contrib.reduce_on_plateau(
-            0.5, 50, accumulation_size=200
+            0.5, 50, accumulation_size=len(train)
         ),  # Use the learning rate from the scheduler.
     )
 
@@ -330,16 +340,20 @@ def main():
 
         e_loss = jnp.square(energy - batch.energies).mean()
         f_loss = jnp.square(forces + batch.forces).mean()
-        o_loss = jnp.mean(
-            # Normal value
-            jnp.square(toccup - batch.toccup).sum(-1)
-            # Sum of occup
-            + jnp.square(toccup.sum(-1) - batch.toccup.sum(-1))
-            # Difference of occup
-            + jnp.square(jnp.diff(toccup, axis=-1) - jnp.diff(batch.toccup, axis=-1))[
-                ..., 0
-            ]
-        )
+
+        if args.predict_magmom:
+            o_loss = jnp.square(toccup - batch.toccup).sum(-1).mean()
+        else:
+            o_loss = jnp.mean(
+                # Normal value
+                jnp.square(toccup - batch.toccup).sum(-1)
+                # Sum of occup
+                + jnp.square(toccup.sum(-1) - batch.toccup.sum(-1))
+                # Difference of occup
+                + jnp.square(
+                    jnp.diff(toccup, axis=-1) - jnp.diff(batch.toccup, axis=-1)
+                )[..., 0]
+            )
 
         loss = (
             args.energy_weight * e_loss
