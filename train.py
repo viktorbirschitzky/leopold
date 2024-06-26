@@ -161,7 +161,10 @@ def main():
     if args.configuration is not None:
         with open(args.configuration, "r") as f:
             config.update(**yaml.safe_load(f))
-    logging.info(f"Read configuration from {args.configuration}")
+    if args.configuration is not None:
+        logging.info(f"Read configuration from {args.configuration}")
+    else:
+        logging.info("Using default configuration")
 
     # ---- LOAD DATABASE
 
@@ -315,7 +318,7 @@ def main():
     opt = optax.chain(
         optax.adam(args.learning_rate),
         optax.contrib.reduce_on_plateau(
-            0.5, 50, accumulation_size=len(train)
+            0.5, patience=5, accumulation_size=len(train)
         ),  # Use the learning rate from the scheduler.
     )
 
@@ -397,7 +400,7 @@ def main():
     logging.info("Starting training")
 
     logging.info(
-        f"{'Total':>35s} {'Energy':>12s} {'Forces':>12s} {'Toccup':>12s}  {'Total':>27s} {'Energy':>12s} {'Forces':>12s} {'Toccup':>12s}"
+        f"{'Total':>35s} {'Energy':>11s} {'Forces':>12s} {'Toccup':>12s}  {'Total':>27s} {'Energy':>11s} {'Forces':>12s} {'Toccup':>12s} | {'Learning rate':>12s}"
     )
 
     lowest_loss, patience_count = jnp.inf, 0
@@ -444,10 +447,12 @@ def main():
         # Loss logging
         train_log, valid_log = "", ""
         for (key, tval), (_, vval) in zip(train_loss.items(), valid_loss.items()):
-            train_log += f"{tval:12.8f} "
-            valid_log += f"{vval:12.8f} "
+            train_log += f"{tval:>12.8f} " if key != "total" else f"{tval:>13.8f}"
+            valid_log += f"{vval:>12.8f} " if key != "total" else f"{vval:>13.8f}"
 
-        logging.info(f"Epoch {i:4} ==> Train: {train_log}   Validation: {valid_log}")
+        logging.info(
+            f"Epoch {i:4} ==> Train: {train_log}   Validation: {valid_log}| {args.learning_rate * optax.tree_utils.tree_get(opt_state, 'scale'):12.8f}"
+        )
 
         # Saving checkpoints
         os.makedirs(args.checkpoints_dir, exist_ok=True)

@@ -167,6 +167,10 @@ def main():
 
         return energy
 
+    # Solving backward compatibilty
+    if not hasattr(config, "preidct_magmom"):
+        config.predict_magmom = False
+
     # ---- DEFINE SIMULATION
     _, shift = space.periodic_general(data.cell[0])
     init_fn, step_fn = simulate.nvt_nose_hoover(
