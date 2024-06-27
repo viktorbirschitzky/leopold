@@ -53,6 +53,7 @@ def arg_parse() -> Namespace:
         "--default_dtype", type=str, choices=["float64", "float32"], default="float64"
     )
     parser.add_argument("--predict_magmom", action="store_true")
+    parser.add_argument("--occup_clipping", action="store_true")
 
     # Train specifics
     parser.add_argument("--energy_weight", type=float, default=1.0)
@@ -98,6 +99,9 @@ def default_config() -> ConfigDict:
     # Standard deviation used for the initializer of the weight matrix in the
     # radial scalar MLP
     config.scalar_mlp_std = 4.0
+
+    # Set no clipping for the magnetization
+    config.occup_clipping = False
 
     return config
 
@@ -280,17 +284,15 @@ def main():
 
     toccup_shift, toccup_scale = [], []
     for z in species.T[:-1]:
-        # INFO: Old version without sigmoid
-        # toccup_shift.append([toccup[z.T == 1].mean()])
-        # toccup_scale.append([toccup[z.T == 1].std()])
+        if not config.get("occup_clipping", False):
+            toccup_shift.append([toccup[z.T == 1].mean()])
+            toccup_scale.append([toccup[z.T == 1].std()])
+        else:
+            toccup_shift.append(toccup[z.T == 1].min(0))
+            toccup_scale.append(toccup[z.T == 1].max(0) - toccup[z.T == 1].min(0))
 
-        # INFO: Sigmoid range of work [min + sigmoid * (max - min)]
-        toccup_shift.append(toccup[z.T == 1].min(0))
-        toccup_scale.append(toccup[z.T == 1].max(0) - toccup[z.T == 1].min(0))
-
-    # INFO: Increase the range of actio a little
-    config.scale_occ = jnp.array(toccup_scale) + 0.2
-    config.shift_occ = jnp.array(toccup_shift) - 0.1
+    config.scale_occ = jnp.array(toccup_scale)
+    config.shift_occ = jnp.array(toccup_shift)
 
     logging.info("Using species-dependent occupation matrix scaling and shift:")
     for i, (scale, shift) in enumerate(zip(toccup_scale, toccup_shift)):

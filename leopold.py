@@ -90,6 +90,7 @@ class NequIPEnergyModel(nn.Module):
     scalar_mlp_std: float = 4.0
 
     learn_energy: bool = True
+    occup_clipping: bool = False
 
     def __post_init__(self):
         super().__post_init__()
@@ -180,7 +181,11 @@ class NequIPEnergyModel(nn.Module):
         scale_occ = jnp.matmul(graph.nodes[:, :-1], self.scale_occ)
         shift_occ = jnp.matmul(graph.nodes[:, :-1], self.shift_occ)
 
-        magnetizations = scale_occ * sigmoid(magnetizations) + shift_occ
+        # Clip Magnetization if needed
+        if self.occup_clipping:
+            magnetizations = sigmoid(magnetizations)
+
+        magnetizations = scale_occ * magnetizations + shift_occ
 
         return global_output, magnetizations
 
@@ -197,10 +202,6 @@ def model_from_config(cfg: ConfigDict) -> NequIPEnergyModel:
         scale, shift = cfg.scale, cfg.shift
     else:
         raise ValueError
-
-    learn_energy = False
-    if hasattr(cfg, "learn_energy"):
-        learn_energy = cfg.learn_energy
 
     model = NequIPEnergyModel(
         graph_net_steps=cfg.graph_net_steps,
@@ -220,7 +221,8 @@ def model_from_config(cfg: ConfigDict) -> NequIPEnergyModel:
         scale_occ=cfg.scale_occ,
         n_neighbors=cfg.n_neighbors,
         scalar_mlp_std=cfg.scalar_mlp_std,
-        learn_energy=learn_energy,
+        learn_energy=cfg.get("learn_energy", False),
+        occup_clipping=cfg.get("occup_clipping", False),
     )
 
     return model
