@@ -281,23 +281,23 @@ def main():
             )
 
             # Run the states
-            vstate, energy, toccup = vupdate(state, vatoms[0])
+            vstate, _, vtoccup = vupdate(state, vatoms[0])
 
-            temp = [jnp.diff(toccup, axis=-1).sum(1)[..., 0]]
+            temp = [jnp.diff(vtoccup, axis=-1).sum(1)[..., 0]]
             for _ in range(args.num_update - 1):
-                vstate, energy, toccup = vvupdate(vstate, vatoms[0])
+                vstate, _, vtoccup = vvupdate(vstate, vatoms[0])
 
-                temp.append(jnp.diff(toccup, axis=-1).sum(1)[..., 0])
+                temp.append(jnp.diff(vtoccup, axis=-1).sum(1)[..., 0])
             tmagn = jnp.array(temp).T
 
             for atom in vatoms[1:]:
-                vstate, energy, toccup = vupdate(state, atom)
+                vstate, _, vtoccup = vupdate(state, atom)
 
-                temp = [jnp.diff(toccup, axis=-1).sum(1)[..., 0]]
+                temp = [jnp.diff(vtoccup, axis=-1).sum(1)[..., 0]]
                 for _ in range(args.num_update - 1):
-                    vstate, energy, toccup = vvupdate(vstate, atom)
+                    vstate, _, vtoccup = vvupdate(vstate, atom)
 
-                    temp.append(jnp.diff(toccup, axis=-1).sum(1)[..., 0])
+                    temp.append(jnp.diff(vtoccup, axis=-1).sum(1)[..., 0])
                 tmagn = jnp.append(tmagn, jnp.array(temp).T, axis=0)
 
             # Find right index
