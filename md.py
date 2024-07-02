@@ -48,14 +48,15 @@ def arg_parse() -> Namespace:
     parser.add_argument("--time_step", type=float, default=1)
     parser.add_argument("--temperature", type=float, default=300)
     parser.add_argument("--num_steps", type=int, default=10_000_000)
-    parser.add_argument("--mag_thresh", type=float, default=0.9)
+    parser.add_argument("--mag_thresh", type=float, default=0.8)
+    parser.add_argument("--num_update", type=int, default=20)
 
     # Logging options
     parser.add_argument("--log_interval", type=int, default=5)
     parser.add_argument("--log_level", help="log level", type=str, default="INFO")
 
     # Saving options
-    parser.add_argument("--batch_size", type=int, default=100_000)
+    parser.add_argument("--batch_size", type=int, default=20)
     parser.add_argument("--compression_level", type=int, default=5)
 
     # General options
@@ -254,54 +255,63 @@ def main():
 
         if jnp.abs(magmom.sum()) < args.mag_thresh:
             # Create configurations with different polaron
-            atoms = jnp.repeat(atoms.at[0, :, -1].set(0), 96, 0)
+            vatoms = jnp.repeat(atoms.at[0, :, -1].set(0), 96, 0)
 
             _, pol, species = jnp.indices(atoms.shape)
 
-            atoms = jnp.where(
+            vatoms = jnp.where(
                 jnp.logical_and(
                     pol == jnp.arange(96)[:, jnp.newaxis, jnp.newaxis], species == 2
                 ),
                 1,
-                atoms,
+                vatoms,
             )
 
             # Batch them
-            n_batch = 1 + (len(data.species) // args.batch_size)
+            n_batch = 1 + (len(vatoms) // args.batch_size)
 
             # Avoid create an empty batch
-            if len(data.species) % args.batch_size == 0:
+            if len(vatoms) % args.batch_size == 0:
                 n_batch -= 1
 
-            atoms = jnp.split(
-                atoms,
+            vatoms = jnp.split(
+                vatoms,
                 [(i + 1) * args.batch_size for i in range(n_batch - 1)],
                 axis=0,
             )
 
             # Run the states
-            tmagn = []
-            for atom in atoms:
-                vstate, energy, toccup = vupdate(state, atoms)
+            vstate, energy, toccup = vupdate(state, vatoms[0])
 
-                temp = [jnp.diff(toccup, axis=-1).sum(1)]
-                for _ in range(10):
-                    vstate, energy, toccup = vvupdate(vstate, atoms)
+            temp = [jnp.diff(toccup, axis=-1).sum(1)[..., 0]]
+            for _ in range(args.num_update - 1):
+                vstate, energy, toccup = vvupdate(vstate, vatoms[0])
 
-                    temp.append(jnp.diff(toccup, axis=-1).sum(1))
-                tmagn.append(jnp.array(temp).T)
-            tmagn = jnp.array(tmagn)
+                temp.append(jnp.diff(toccup, axis=-1).sum(1)[..., 0])
+            tmagn = jnp.array(temp).T
 
-            mask = jnp.isclose(tmagn, -1, atol=0.2, rtol=0).all(1)
+            for atom in vatoms[1:]:
+                vstate, energy, toccup = vupdate(state, atom)
 
-            print(mask.nonzero()[0])
+                temp = [jnp.diff(toccup, axis=-1).sum(1)[..., 0]]
+                for _ in range(args.num_update - 1):
+                    vstate, energy, toccup = vvupdate(vstate, atom)
 
-            # for i, (e, m) in enumerate(zip(energy, jnp.diff(toccup, axis=-1)[..., 0])):
-            #     logging.info(
-            #         f"{i:3d} ==> E: {e: 10.5f}\tM: {m[i]: 10.5f}\tMm: {m.min(): 10.5f}\tMt: {m.sum(): 10.5f}\tD: {jnp.linalg.norm(distance(state.position[0, pol_state[0]], state.position[0, i])): 10.5f}"
-            #     )
+                    temp.append(jnp.diff(toccup, axis=-1).sum(1)[..., 0])
+                tmagn = jnp.append(tmagn, jnp.array(temp).T, axis=0)
 
-            break
+            # Find right index
+            good_pol = jnp.isclose(tmagn, -1, atol=0.2, rtol=0).all(1).nonzero()[0]
+
+            good_dis = jnp.linalg.norm(
+                vmap(distance, (None, 0))(
+                    state.position[pol_state[0]], state.position[good_pol]
+                ),
+                axis=-1,
+            )
+
+            atoms = atoms.at[..., -1].set(0)
+            atoms = atoms.at[:, good_pol[jnp.argmin(good_dis)], -1].set(1)
 
         # Compute interesting quantites
         temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
