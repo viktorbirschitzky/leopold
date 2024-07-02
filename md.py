@@ -253,7 +253,7 @@ def main():
         atoms = atoms.at[:, pol_state[0], -1].set(1)
 
         if jnp.abs(magmom.sum()) < args.mag_thresh:
-            # look for random flight
+            # Create configurations with different polaron
             atoms = jnp.repeat(atoms.at[0, :, -1].set(0), 96, 0)
 
             _, pol, species = jnp.indices(atoms.shape)
@@ -266,16 +266,33 @@ def main():
                 atoms,
             )
 
-            state, energy, toccup = vupdate(state, atoms)
+            # Batch them
+            n_batch = 1 + (len(data.species) // args.batch_size)
 
-            tmagn = [jnp.diff(toccup, axis=-1).sum(1)]
-            for _ in range(10):
-                state, energy, toccup = vvupdate(state, atoms)
+            # Avoid create an empty batch
+            if len(data.species) % args.batch_size == 0:
+                n_batch -= 1
 
-                tmagn.append(jnp.diff(toccup, axis=-1).sum(1))
+            atoms = jnp.split(
+                atoms,
+                [(i + 1) * args.batch_size for i in range(n_batch - 1)],
+                axis=0,
+            )
+
+            # Run the states
+            tmagn = []
+            for atom in atoms:
+                vstate, energy, toccup = vupdate(state, atoms)
+
+                temp = [jnp.diff(toccup, axis=-1).sum(1)]
+                for _ in range(10):
+                    vstate, energy, toccup = vvupdate(vstate, atoms)
+
+                    temp.append(jnp.diff(toccup, axis=-1).sum(1))
+                tmagn.append(jnp.array(temp).T)
             tmagn = jnp.array(tmagn)
 
-            mask = jnp.isclose(tmagn, -1, atol=0.2, rtol=0).all(0)
+            mask = jnp.isclose(tmagn, -1, atol=0.2, rtol=0).all(1)
 
             print(mask.nonzero()[0])
 
