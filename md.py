@@ -195,15 +195,32 @@ def main():
 
     @jit
     def predict_magmom_evolution(state: NVTNoseHooverState, atoms: Array):
-        tstate = tree_map(lambda x: jnp.repeat(jnp.array([x]), len(atoms), 0), state)
+        vstate = tree_map(lambda x: jnp.repeat(jnp.array([x]), len(atoms), 0), state)
 
-        magn = []
+        magmom = []
         for _ in range(args.num_update):
-            tstate, _, vtoccup = vupdate(tstate, atom)
+            vstate, _, vtoccup = vupdate(vstate, atoms)
 
-            magn.append(jnp.diff(vtoccup, axis=-1).sum(1)[..., 0])
+            # Modify Polaron position
+            if not config.predict_magmom:
+                vmagmom = jnp.diff(vtoccup, axis=-1)
+            else:
+                vmagmom = vtoccup[:, :, 0:1]
+            pol_state = jnp.argmin(vmagmom[..., 0], axis=-1)
 
-        return jnp.array(magn).T
+            atoms = atoms.at[..., -1].set(0)
+            _, idx, spec = jnp.indices(atoms.shape)
+            atoms = jnp.where(
+                jnp.logical_and(
+                    idx == pol_state[:, jnp.newaxis, jnp.newaxis], spec == 2
+                ),
+                1,
+                atoms,
+            )
+
+            magmom.append(jnp.diff(vtoccup, axis=-1).sum(1)[..., 0])
+
+        return jnp.array(magmom).T
 
     # ---- INITIALIZATION
     state = init_fn(
