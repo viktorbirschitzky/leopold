@@ -12,6 +12,7 @@ import os
 import jax.numpy as jnp
 import jax.random as jrn
 
+from jax.tree_util import tree_map
 from jax import jit, vmap
 
 # Jax MD
@@ -190,8 +191,19 @@ def main():
 
         return state, energy, toccup
 
-    vupdate = vmap(update, (None, 0))
-    vvupdate = vmap(update)
+    vupdate = vmap(update)
+
+    @jit
+    def predict_magmom_evolution(state: NVTNoseHooverState, atoms: Array):
+        tstate = tree_map(lambda x: jnp.repeat(jnp.array([x]), len(atoms), 0), state)
+
+        magn = []
+        for _ in range(args.num_update):
+            tstate, _, vtoccup = vupdate(tstate, atom)
+
+            magn.append(jnp.diff(vtoccup, axis=-1).sum(1)[..., 0])
+
+        return jnp.array(magn).T
 
     # ---- INITIALIZATION
     state = init_fn(
@@ -255,9 +267,11 @@ def main():
 
         if jnp.abs(magmom.sum()) < args.mag_thresh:
             # Create configurations with different polaron
-            vatoms = jnp.repeat(atoms.at[0, :, -1].set(0), 96, 0)
+            # TODO: Make it so that it fids the number of positions where the polaron can be,
+            # like selecting only the sites with the same species of the one where the polaron is right now
+            vatoms = jnp.repeat(atoms.at[..., -1].set(0), 96, 0)
 
-            _, pol, species = jnp.indices(atoms.shape)
+            _, pol, species = jnp.indices(vatoms.shape)
 
             vatoms = jnp.where(
                 jnp.logical_and(
@@ -270,7 +284,6 @@ def main():
             # Batch them
             n_batch = 1 + (len(vatoms) // args.batch_size)
 
-            # Avoid create an empty batch
             if len(vatoms) % args.batch_size == 0:
                 n_batch -= 1
 
@@ -280,28 +293,14 @@ def main():
                 axis=0,
             )
 
-            # Run the states
-            vstate, _, vtoccup = vupdate(state, vatoms[0])
-
-            temp = [jnp.diff(vtoccup, axis=-1).sum(1)[..., 0]]
-            for _ in range(args.num_update - 1):
-                vstate, _, vtoccup = vvupdate(vstate, vatoms[0])
-
-                temp.append(jnp.diff(vtoccup, axis=-1).sum(1)[..., 0])
-            tmagn = jnp.array(temp).T
-
-            for atom in vatoms[1:]:
-                vstate, _, vtoccup = vupdate(state, atom)
-
-                temp = [jnp.diff(vtoccup, axis=-1).sum(1)[..., 0]]
-                for _ in range(args.num_update - 1):
-                    vstate, _, vtoccup = vvupdate(vstate, atom)
-
-                    temp.append(jnp.diff(vtoccup, axis=-1).sum(1)[..., 0])
-                tmagn = jnp.append(tmagn, jnp.array(temp).T, axis=0)
+            # Get how the total magmetization will evolve
+            next_magmoms = [predict_magmom_evolution(state, x) for x in vatoms]
+            next_magmoms = jnp.concat(next_magmoms, axis=0)
 
             # Find right index
-            good_pol = jnp.isclose(tmagn, -1, atol=0.2, rtol=0).all(1).nonzero()[0]
+            good_pol = (
+                jnp.isclose(next_magmoms, -1, atol=0.2, rtol=0).all(1).nonzero()[0]
+            )
 
             good_dis = jnp.linalg.norm(
                 vmap(distance, (None, 0))(
