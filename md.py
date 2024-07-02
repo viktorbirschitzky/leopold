@@ -267,13 +267,22 @@ def main():
             )
 
             state, energy, toccup = vupdate(state, atoms)
-            for _ in range(40):
+
+            tmagn = [jnp.diff(toccup, axis=-1).sum(1)]
+            for _ in range(10):
                 state, energy, toccup = vvupdate(state, atoms)
 
-            for i, (e, m) in enumerate(zip(energy, jnp.diff(toccup, axis=-1)[..., 0])):
-                logging.info(
-                    f"{i:3d} ==> E: {e: 10.5f}\tM: {m[i]: 10.5f}\tMm: {m.min(): 10.5f}\tMt: {m.sum(): 10.5f}\tD: {jnp.linalg.norm(distance(state.position[0, pol_state[0]], state.position[0, i])): 10.5f}"
-                )
+                tmagn.append(jnp.diff(toccup, axis=-1).sum(1))
+            tmagn = jnp.array(tmagn)
+
+            mask = jnp.isclose(tmagn, -1, atol=0.2, rtol=0).all(0)
+
+            print(mask.nonzero()[0])
+
+            # for i, (e, m) in enumerate(zip(energy, jnp.diff(toccup, axis=-1)[..., 0])):
+            #     logging.info(
+            #         f"{i:3d} ==> E: {e: 10.5f}\tM: {m[i]: 10.5f}\tMm: {m.min(): 10.5f}\tMt: {m.sum(): 10.5f}\tD: {jnp.linalg.norm(distance(state.position[0, pol_state[0]], state.position[0, i])): 10.5f}"
+            #     )
 
             break
 
