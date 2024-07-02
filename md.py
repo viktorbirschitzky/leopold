@@ -173,7 +173,7 @@ def main():
         config.predict_magmom = False
 
     # ---- DEFINE SIMULATION
-    _, shift = space.periodic_general(data.cell[0])
+    distance, shift = space.periodic_general(data.cell[0])
     init_fn, step_fn = simulate.nvt_nose_hoover(
         energy_fn,
         shift,
@@ -249,8 +249,18 @@ def main():
         atoms = atoms.at[..., -1].set(0)
         atoms = atoms.at[:, pol_state[0], -1].set(1)
 
-        if np.abs(magmom[pol_state[0]]) < args.mag_thresh:
+        if jnp.abs(magmom[pol_state[0]]) < args.mag_thresh:
             # look for random flight
+            for i in range(96):
+                _, energy, toccup = update(
+                    state, atoms[0].at[..., -1].set(0).at[:, i, -1].set(1)
+                )
+
+                print(
+                    f"{i:3d} ==> E: {energy: 10.5f}\tM: {jnp.diff(toccup, axis=-1)[0, i]: 10.5f}\tD: {jnp.linalg.norm(distance(state.position[pol_state[0]], state.position[i])): 10.5f}"
+                )
+
+            break
 
         # Compute interesting quantites
         temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
@@ -274,7 +284,7 @@ def main():
                 f"{temp:12.3f} "
                 f"{pol_state[0]:14d} {magmom[pol_state[0]].flatten()[0]:17.3f}"
                 f"{pol_state[0]:14d} {magmom.sum():17.3f}"
-                #f"{pol_state[1]:15d} {magmom[pol_state[1]].flatten()[0]:17.3f}"
+                # f"{pol_state[1]:15d} {magmom[pol_state[1]].flatten()[0]:17.3f}"
             )
     # Flush unwritten data
     writer.flush()
