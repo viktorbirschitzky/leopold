@@ -12,7 +12,7 @@ import os
 import jax.numpy as jnp
 import jax.random as jrn
 
-from jax import jit
+from jax import jit, vmap
 
 # Jax MD
 from jax_md import simulate, space
@@ -48,7 +48,7 @@ def arg_parse() -> Namespace:
     parser.add_argument("--time_step", type=float, default=1)
     parser.add_argument("--temperature", type=float, default=300)
     parser.add_argument("--num_steps", type=int, default=10_000_000)
-    parser.add_argument("--mag_thresh", type=float, default=0.5)
+    parser.add_argument("--mag_thresh", type=float, default=0.9)
 
     # Logging options
     parser.add_argument("--log_interval", type=int, default=5)
@@ -189,6 +189,9 @@ def main():
 
         return state, energy, toccup
 
+    vupdate = vmap(update, (None, 0))
+    vvupdate = vmap(update)
+
     # ---- INITIALIZATION
     state = init_fn(
         jrn.PRNGKey(args.seed),
@@ -249,15 +252,27 @@ def main():
         atoms = atoms.at[..., -1].set(0)
         atoms = atoms.at[:, pol_state[0], -1].set(1)
 
-        if jnp.abs(magmom[pol_state[0]]) < args.mag_thresh:
+        if jnp.abs(magmom.sum()) < args.mag_thresh:
             # look for random flight
-            for i in range(96):
-                _, energy, toccup = update(
-                    state, atoms[0].at[..., -1].set(0).at[:, i, -1].set(1)
-                )
+            atoms = jnp.repeat(atoms.at[0, :, -1].set(0), 96, 0)
 
-                print(
-                    f"{i:3d} ==> E: {energy: 10.5f}\tM: {jnp.diff(toccup, axis=-1)[0, i]: 10.5f}\tD: {jnp.linalg.norm(distance(state.position[pol_state[0]], state.position[i])): 10.5f}"
+            _, pol, species = jnp.indices(atoms.shape)
+
+            atoms = jnp.where(
+                jnp.logical_and(
+                    pol == jnp.arange(96)[:, jnp.newaxis, jnp.newaxis], species == 2
+                ),
+                1,
+                atoms,
+            )
+
+            state, energy, toccup = vupdate(state, atoms)
+            for _ in range(40):
+                state, energy, toccup = vvupdate(state, atoms)
+
+            for i, (e, m) in enumerate(zip(energy, jnp.diff(toccup, axis=-1)[..., 0])):
+                logging.info(
+                    f"{i:3d} ==> E: {e: 10.5f}\tM: {m[i]: 10.5f}\tMm: {m.min(): 10.5f}\tMt: {m.sum(): 10.5f}\tD: {jnp.linalg.norm(distance(state.position[0, pol_state[0]], state.position[0, i])): 10.5f}"
                 )
 
             break
@@ -283,8 +298,8 @@ def main():
                 f"{energy:12.3f} "
                 f"{temp:12.3f} "
                 f"{pol_state[0]:14d} {magmom[pol_state[0]].flatten()[0]:17.3f}"
-                f"{pol_state[0]:14d} {magmom.sum():17.3f}"
-                # f"{pol_state[1]:15d} {magmom[pol_state[1]].flatten()[0]:17.3f}"
+                f"{pol_state[1]:15d} {magmom[pol_state[1]].flatten()[0]:17.3f}"
+                f"{magmom.sum():17.3f}"
             )
     # Flush unwritten data
     writer.flush()
