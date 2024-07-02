@@ -48,6 +48,7 @@ def arg_parse() -> Namespace:
     parser.add_argument("--time_step", type=float, default=1)
     parser.add_argument("--temperature", type=float, default=300)
     parser.add_argument("--num_steps", type=int, default=10_000_000)
+    parser.add_argument("--mag_thresh", type=float, default=0.5)
 
     # Logging options
     parser.add_argument("--log_interval", type=int, default=5)
@@ -248,6 +249,9 @@ def main():
         atoms = atoms.at[..., -1].set(0)
         atoms = atoms.at[:, pol_state[0], -1].set(1)
 
+        if np.abs(magmom[pol_state[0]]) < args.mag_thresh:
+            # look for random flight
+
         # Compute interesting quantites
         temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
 
@@ -269,9 +273,9 @@ def main():
                 f"{energy:12.3f} "
                 f"{temp:12.3f} "
                 f"{pol_state[0]:14d} {magmom[pol_state[0]].flatten()[0]:17.3f}"
-                f"{pol_state[1]:15d} {magmom[pol_state[1]].flatten()[0]:17.3f}"
+                f"{pol_state[0]:14d} {magmom.sum():17.3f}"
+                #f"{pol_state[1]:15d} {magmom[pol_state[1]].flatten()[0]:17.3f}"
             )
-
     # Flush unwritten data
     writer.flush()
 
