@@ -57,6 +57,7 @@ def arg_parse() -> Namespace:
 
     # Train specifics
     parser.add_argument("--energy_weight", type=float, default=1.0)
+    parser.add_argument("--smagmo_weight", type=float, default=1.0)
     parser.add_argument("--forces_weight", type=float, default=None)
     parser.add_argument("--toccup_weight", type=float, default=None)
     parser.add_argument("--max_epoch", type=int, default=1000)
@@ -345,45 +346,36 @@ def main():
 
         e_loss = jnp.square(energy - batch.energies).mean()
         f_loss = jnp.square(forces + batch.forces).mean()
-
-        if args.predict_magmom:
-            o_loss = jnp.mean(
-                jnp.square(toccup - batch.toccup).sum(-1)
-                + jnp.square(toccup.sum(1) - batch.toccup.sum(1))
-            )
-        else:
-            o_loss = (
-                jnp.mean(
-                    # Normal value
-                    jnp.square(toccup - batch.toccup).sum(-1)
-                    # Sum of occup
-                    + jnp.square(toccup.sum(-1) - batch.toccup.sum(-1))
-                    # Difference of occup
-                    + jnp.square(
-                        jnp.diff(toccup, axis=-1) - jnp.diff(batch.toccup, axis=-1)
-                    )[..., 0]
-                )
-                + jnp.square(
-                    # Sum of all magnetizations
-                    jnp.diff(toccup, axis=-1).sum(1)
-                    - jnp.diff(batch.toccup, axis=-1).sum(1)
-                ).mean()
-            )
+        o_loss = jnp.mean(
+            # Normal value
+            jnp.square(toccup - batch.toccup).sum(-1)
+            # Sum of occup
+            + jnp.square(toccup.sum(-1) - batch.toccup.sum(-1))
+            # Difference of occup
+            + jnp.square(jnp.diff(toccup, axis=-1) - jnp.diff(batch.toccup, axis=-1))[
+                ..., 0
+            ]
+        )
+        # Sum of all magnetizations
+        s_loss = jnp.square(
+            jnp.diff(toccup, axis=-1).sum(1) - jnp.diff(batch.toccup, axis=-1).sum(1)
+        ).mean()
 
         loss = (
             args.energy_weight * e_loss
             + args.forces_weight * f_loss
             + args.toccup_weight * o_loss
+            + args.smagmo_weight * s_loss
         )
 
-        return loss, (e_loss, f_loss, o_loss)
+        return loss, (e_loss, f_loss, o_loss, s_loss)
 
     # Define the training function
     @jit
     def update(params, opt_state, batch: AtomsData):
         grad_fn = value_and_grad(loss_fn, has_aux=True)
 
-        (loss, (e_loss, f_loss, o_loss)), params_grad = grad_fn(params, batch)
+        (loss, (e_loss, f_loss, o_loss, s_loss)), params_grad = grad_fn(params, batch)
 
         updates, opt_state = opt.update(
             params_grad, opt_state, params, value=jnp.float32(loss)
@@ -392,7 +384,7 @@ def main():
         return (
             optax.apply_updates(params, updates),
             opt_state,
-            (loss, e_loss, f_loss, o_loss),
+            (loss, e_loss, f_loss, o_loss, s_loss),
         )
 
     # Load existing parameters if wanted
@@ -412,13 +404,13 @@ def main():
     logging.info("Starting training")
 
     logging.info(
-        f"{'Total':>35s} {'Energy':>11s} {'Forces':>12s} {'Toccup':>12s}  {'Total':>27s} {'Energy':>11s} {'Forces':>12s} {'Toccup':>12s} | {'Learning rate':>12s}"
+        f"{'Total':>35s} {'Energy':>11s} {'Forces':>12s} {'Toccup':>12s} {'Magmom Sum':>12s}  {'Total':>27s} {'Energy':>11s} {'Forces':>12s} {'Toccup':>12s} {'Magmom Sum':>12s} | {'Learning rate':>12s}"
     )
 
     lowest_loss, patience_count = jnp.inf, 0
     for i in range(args.max_epoch):
         if patience_count == args.patience:
-            logging.info("Too many iterations wihtout improvement, stopping training")
+            logging.info("Too many iterations without improvement, stopping training")
             break
 
         # Train loop and loss
@@ -427,6 +419,7 @@ def main():
             "energy": jnp.array([]),
             "force": jnp.array([]),
             "toccup": jnp.array([]),
+            "magsum": jnp.array([]),
         }
         for batch in train:
             params, opt_state, losses = update(params, opt_state, batch)
@@ -443,12 +436,13 @@ def main():
             "energy": jnp.array([]),
             "force": jnp.array([]),
             "toccup": jnp.array([]),
+            "magsum": jnp.array([]),
         }
         for batch in eval:
             losses = loss_fn(params, batch)
 
             # Flatten the tuple
-            losses = (losses[0], losses[1][0], losses[1][1], losses[1][2])
+            losses = (losses[0], losses[1][0], losses[1][1], losses[1][2], losses[1][3])
 
             for key, loss in zip(valid_loss.keys(), losses):
                 valid_loss[key] = jnp.append(valid_loss[key], loss)
