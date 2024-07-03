@@ -347,17 +347,27 @@ def main():
         f_loss = jnp.square(forces + batch.forces).mean()
 
         if args.predict_magmom:
-            o_loss = jnp.square(toccup - batch.toccup).sum(-1).mean()
-        else:
             o_loss = jnp.mean(
-                # Normal value
                 jnp.square(toccup - batch.toccup).sum(-1)
-                # Sum of occup
-                + jnp.square(toccup.sum(-1) - batch.toccup.sum(-1))
-                # Difference of occup
+                + jnp.square(toccup.sum(1) - batch.toccup.sum(1))
+            )
+        else:
+            o_loss = (
+                jnp.mean(
+                    # Normal value
+                    jnp.square(toccup - batch.toccup).sum(-1)
+                    # Sum of occup
+                    + jnp.square(toccup.sum(-1) - batch.toccup.sum(-1))
+                    # Difference of occup
+                    + jnp.square(
+                        jnp.diff(toccup, axis=-1) - jnp.diff(batch.toccup, axis=-1)
+                    )[..., 0]
+                )
                 + jnp.square(
-                    jnp.diff(toccup, axis=-1) - jnp.diff(batch.toccup, axis=-1)
-                )[..., 0]
+                    # Sum of all magnetizations
+                    jnp.diff(toccup, axis=-1).sum(1)
+                    - jnp.diff(batch.toccup, axis=-1).sum(1)
+                ).mean()
             )
 
         loss = (
