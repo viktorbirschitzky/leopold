@@ -204,7 +204,7 @@ def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
         symbols, pol_state = data.species[i, :, :-1], data.species[i, :, -1]
         atom = Atoms(
             numbers=jnp.matmul(symbols, data.atom_num[0]),
-            scaled_positions=data.positions[0],
+            scaled_positions=data.positions[i],
             cell=data.cell[i],
             pbc=(True, True, True),
         )
