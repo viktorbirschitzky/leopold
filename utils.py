@@ -4,6 +4,7 @@
 
 # Generics
 import os
+import pickle
 
 # Numpy
 import numpy as np
@@ -12,7 +13,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax.random as jrn
 
-from jax import value_and_grad, vmap
+from jax import value_and_grad, vmap, jit
 
 # Jax MD
 from jax_md import nn, space, partition
@@ -22,6 +23,7 @@ from leopold import model_from_config
 
 # ASE
 from ase.io import read
+from ase.calculators.calculator import Calculator, all_changes
 
 # Tables
 import tables as tb
@@ -220,6 +222,87 @@ def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
 
     return atoms
 
+def get_model_inputs_from_atoms(atoms):
+    # Informations about the chemical species
+    elements = jnp.unique(jnp.array(atoms.get_atomic_numbers()))
+
+
+    # Collect all the other informations
+    #energies = atoms.info["energy"]
+    positions = atoms.get_scaled_positions()
+    #forces = atom.arrays["forces"]
+    cell = atoms.cell.array
+
+    #toccup = atom.arrays["toccup"]
+
+    atom_num = jnp.array([atoms.get_atomic_numbers()])
+    _species = jnp.where(atom_num.T == elements, 1, 0)
+    species = jnp.append(_species, jnp.array([atoms.arrays["pol_state"]]).T, axis=1)
+
+    return positions, cell, species
+
+class LeopoldCalculator(Calculator):
+    """Leopold inside an ASE calculator
+    """
+    implemented_properties = ["energy", "forces", "free_energy", "magmom"]
+    def __init__(
+        self,
+        model_path,
+        data_path
+    ):
+        Calculator.__init__(self)
+        self.results = {}
+
+        # Load data
+        data = get_data_from_xyz(data_path)
+        data = batch_data(data, 1)
+
+        # Load model    
+        with open(model_path, "rb") as f:
+            config, params, _ = pickle.load(f)
+
+        _, apply_fn = get_model(
+            data[-1],
+            config,
+            fractional_coordinates=True,
+            disable_cell_list=True,
+        )
+
+        self.compiled_model = jit(apply_fn)
+        self.params = params
+
+    def calculate(self, atoms=None, properties=["energy","free_energy","forces","magmom"], system_changes=all_changes):
+        """
+        Calculate properties.
+
+        :param atoms: ase.Atoms object
+        :param properties: [str], properties to be computed, used by ASE internally
+        :param system_changes: [str], system changes since last calculation, used by ASE internally
+        :return:
+        """
+        # call to base-class to set atoms attribute
+
+        
+        Calculator.calculate(self, atoms)
+
+        # prepare data
+        pos, cell, species = get_model_inputs_from_atoms(atoms)
+        # predict + extract data
+        (energies, toccup), forces = self.compiled_model(
+            self.params,
+            pos,
+            cell,
+            species,
+        )
+        
+        self.results = {}
+        # only store results the model actually computed to avoid KeyErrors
+        self.results["energy"] = np.array(energies)
+        self.results["free_energy"] = self.results["energy"]
+        # "force consistant" energy
+        self.results["forces"] = -np.array(forces)
+        self.results["magmom"] = np.diff(toccup, axis=-1)[:,0]
+        
 
 def get_average_num_neighbour(cell: Array, positions: Array, r_max) -> float:
     distance, _ = space.periodic_general(cell)
