@@ -14,6 +14,7 @@ import jax.random as jrn
 
 from jax.tree_util import tree_map
 from jax import jit, vmap
+from jax.nn import softmax
 
 # Jax MD
 from jax_md import simulate, space
@@ -150,13 +151,17 @@ def main():
     if isinstance(atom, list):
         atom = atom[0]
 
-    # Construct data with it
-    data = get_data_from_atoms([atom])
-
     # ---- MODEL CONSTRUCTION
     with open(args.model_path, "rb") as f:
         config, params, _ = pickle.load(f)
 
+    # Construct data with it
+    # TODO: make if so that it directly reads the polaron state and not infer from magmom
+    # This is needed for scalability in future applications, for now is ok since we run
+    # on system on which we also have a dataset
+    data = get_data_from_atoms([atom], config.charge_sensitivity)
+
+    # Use the data for the model
     _, apply_fn = get_model(
         data,
         config,
@@ -277,7 +282,7 @@ def main():
             magmom = jnp.diff(toccup, axis=-1)
         else:
             magmom = toccup[:, 0:1]
-        pol_state = jnp.argsort(magmom, axis=0).flatten()
+        pol_state = softmax(-config.charge_sensitivity * magmom, axis=0).flatten()
 
         atoms = atoms.at[..., -1].set(0)
         atoms = atoms.at[:, pol_state[0], -1].set(1)

@@ -63,6 +63,7 @@ def arg_parse() -> Namespace:
     parser.add_argument("--max_epoch", type=int, default=1000)
     parser.add_argument("--patience", type=int, default=200)
     parser.add_argument("--learning_rate", type=float, default=5e-4)
+    parser.add_argument("--charge_sensitivity", type=float, default=10)
 
     # General options
     parser.add_argument("--log_level", help="log level", type=str, default="INFO")
@@ -176,7 +177,7 @@ def main():
     # Only training set is given
     if len(args.database) < 2:
         # Read data from first file
-        data = get_data_from_xyz(args.database[0])
+        data = get_data_from_xyz(args.database[0], args.charge_sensitivity)
         logging.info(f"Read {len(data.species)} configurations from {args.database[0]}")
 
         # Splitting train and validation at random
@@ -194,7 +195,7 @@ def main():
     # Training set and Test set are given
     elif len(args.database) < 3:
         # Read data from first file
-        data = get_data_from_xyz(args.database[0])
+        data = get_data_from_xyz(args.database[0], args.charge_sensitivity)
         logging.info(f"Read {len(data.species)} configurations from {args.database[0]}")
 
         # Splitting train and validation at random
@@ -207,7 +208,7 @@ def main():
         logging.info(f"Created validation set with {len(eval.species)} configurations")
 
         # Read second file as test data
-        test = get_data_from_xyz(args.database[1])
+        test = get_data_from_xyz(args.database[1], args.charge_sensitivity)
         logging.info(
             f"Loaded {len(test.species)} configurations from {args.database[1]} used for testing"
         )
@@ -215,9 +216,9 @@ def main():
     # Training set, Validation set and Test set are given
     else:
         # Read every file as a different set
-        train = get_data_from_xyz(args.database[0])
-        eval = get_data_from_xyz(args.database[1])
-        test = get_data_from_xyz(args.database[2])
+        train = get_data_from_xyz(args.database[0], args.charge_sensitivity)
+        eval = get_data_from_xyz(args.database[1], args.charge_sensitivity)
+        test = get_data_from_xyz(args.database[2], args.charge_sensitivity)
 
         logging.info(
             f"Loaded {len(train.species)} configurations from {args.database[0]} used for training"
@@ -251,6 +252,9 @@ def main():
         test = batch_data(test, args.batch_size)
 
     # ---- MODEL CONSTRUCTION
+
+    # Save the charge sensitivity
+    config.charge_sensitivity = args.charge_sensitivity
 
     # Update the number of atomic species
     config.n_elements = train[0].species.shape[-1]
@@ -400,7 +404,7 @@ def main():
 
         logging.info(f"Reinitialized the training from checkpoint {check_path}")
 
-    # Start training loop
+    # ---- START TRAINING LOOP
     logging.info("Starting training")
 
     logging.info(

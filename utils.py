@@ -13,6 +13,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax.random as jrn
 
+from jax.nn import softmax
 from jax import value_and_grad, vmap, jit
 
 # Jax MD
@@ -112,7 +113,7 @@ def shuffle_data(rng: Array, data: AtomsData) -> AtomsData:
     return AtomsData(**dict_data)
 
 
-def get_data_from_atoms(atoms: list[Atoms]) -> AtomsData:
+def get_data_from_atoms(atoms: list[Atoms], charge_sensitivity: float) -> AtomsData:
     # Informations about the chemical species
     elements = jnp.unique_values(
         jnp.array([z for atom in atoms for z in atom.get_atomic_numbers()])
@@ -130,8 +131,15 @@ def get_data_from_atoms(atoms: list[Atoms]) -> AtomsData:
 
         atom_num = jnp.array([atom.get_atomic_numbers()])
         _species = jnp.where(atom_num.T == elements, 1, 0)
+
+        magmom = jnp.diff(atom.arrays["toccup"], axis=-1)
+
         species.append(
-            jnp.append(_species, jnp.array([atom.arrays["pol_state"]]).T, axis=1)
+            jnp.append(
+                _species,
+                jnp.array(softmax(-charge_sensitivity * magmom, axis=0)),
+                axis=1,
+            )
         )
 
     return AtomsData(
@@ -146,7 +154,7 @@ def get_data_from_atoms(atoms: list[Atoms]) -> AtomsData:
 
 
 def get_data_from_xyz(
-    file: str, beg: int = 0, end: int = -1, step: int = 1
+    file: str, charge_sensitivity: float, beg: int = 0, end: int = -1, step: int = 1
 ) -> AtomsData:
     atoms = read(
         file, index=f"{beg}:{end if end != -1 else ''}:{step}", format="extxyz"
@@ -154,7 +162,7 @@ def get_data_from_xyz(
     if not isinstance(atoms, list):
         atoms = [atoms]
 
-    return get_data_from_atoms(atoms)
+    return get_data_from_atoms(atoms, charge_sensitivity)
 
 
 def get_data_from_hdf5(
@@ -222,18 +230,14 @@ def get_atoms_from_data(data: AtomsData) -> List[Atoms]:
 
     return atoms
 
+
 def get_model_inputs_from_atoms(atoms):
     # Informations about the chemical species
     elements = jnp.unique(jnp.array(atoms.get_atomic_numbers()))
 
-
     # Collect all the other informations
-    #energies = atoms.info["energy"]
     positions = atoms.get_scaled_positions()
-    #forces = atom.arrays["forces"]
     cell = atoms.cell.array
-
-    #toccup = atom.arrays["toccup"]
 
     atom_num = jnp.array([atoms.get_atomic_numbers()])
     _species = jnp.where(atom_num.T == elements, 1, 0)
@@ -241,25 +245,23 @@ def get_model_inputs_from_atoms(atoms):
 
     return positions, cell, species
 
+
 class LeopoldCalculator(Calculator):
-    """Leopold inside an ASE calculator
-    """
+    """Leopold inside an ASE calculator"""
+
     implemented_properties = ["energy", "forces", "free_energy", "magmom"]
-    def __init__(
-        self,
-        model_path,
-        data_path
-    ):
+
+    def __init__(self, model_path, data_path):
         Calculator.__init__(self)
         self.results = {}
 
-        # Load data
-        data = get_data_from_xyz(data_path)
-        data = batch_data(data, 1)
-
-        # Load model    
+        # Load model
         with open(model_path, "rb") as f:
             config, params, _ = pickle.load(f)
+
+        # Load data
+        data = get_data_from_xyz(data_path, config.charge_sensitivity)
+        data = batch_data(data, 1)
 
         _, apply_fn = get_model(
             data[-1],
@@ -271,7 +273,12 @@ class LeopoldCalculator(Calculator):
         self.compiled_model = jit(apply_fn)
         self.params = params
 
-    def calculate(self, atoms=None, properties=["energy","free_energy","forces","magmom"], system_changes=all_changes):
+    def calculate(
+        self,
+        atoms=None,
+        properties=["energy", "free_energy", "forces", "magmom"],
+        system_changes=all_changes,
+    ):
         """
         Calculate properties.
 
@@ -282,7 +289,6 @@ class LeopoldCalculator(Calculator):
         """
         # call to base-class to set atoms attribute
 
-        
         Calculator.calculate(self, atoms)
 
         # prepare data
@@ -294,15 +300,15 @@ class LeopoldCalculator(Calculator):
             cell,
             species,
         )
-        
+
         self.results = {}
         # only store results the model actually computed to avoid KeyErrors
         self.results["energy"] = np.array(energies)
         self.results["free_energy"] = self.results["energy"]
         # "force consistant" energy
         self.results["forces"] = -np.array(forces)
-        self.results["magmom"] = np.diff(toccup, axis=-1)[:,0]
-        
+        self.results["magmom"] = np.diff(toccup, axis=-1)[:, 0]
+
 
 def get_average_num_neighbour(cell: Array, positions: Array, r_max) -> float:
     distance, _ = space.periodic_general(cell)
