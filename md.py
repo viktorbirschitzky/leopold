@@ -284,55 +284,54 @@ def main():
             magmom = toccup[:, 0:1]
         pol_state = softmax(-config.charge_sensitivity * magmom, axis=0).flatten()
 
-        atoms = atoms.at[..., -1].set(0)
-        atoms = atoms.at[:, pol_state[0], -1].set(1)
+        atoms = atoms.at[:, :, -1].set(pol_state)
 
-        if jnp.abs(magmom.sum()) < args.mag_thresh:
-            # Create configurations with different polaron
-            # TODO: Make it so that it fids the number of positions where the polaron can be,
-            # like selecting only the sites with the same species of the one where the polaron is right now
-            vatoms = jnp.repeat(atoms.at[..., -1].set(0), 96, 0)
-
-            _, pol, species = jnp.indices(vatoms.shape)
-
-            vatoms = jnp.where(
-                jnp.logical_and(
-                    pol == jnp.arange(96)[:, jnp.newaxis, jnp.newaxis], species == 2
-                ),
-                1,
-                vatoms,
-            )
-
-            # Batch them
-            n_batch = 1 + (len(vatoms) // args.batch_size)
-
-            if len(vatoms) % args.batch_size == 0:
-                n_batch -= 1
-
-            vatoms = jnp.split(
-                vatoms,
-                [(i + 1) * args.batch_size for i in range(n_batch - 1)],
-                axis=0,
-            )
-
-            # Get how the total magmetization will evolve
-            next_magmoms = [predict_magmom_evolution(state, x) for x in vatoms]
-            next_magmoms = jnp.concat(next_magmoms, axis=0)
-
-            # Find right index
-            good_pol = (
-                jnp.isclose(next_magmoms, -1, atol=0.2, rtol=0).all(1).nonzero()[0]
-            )
-
-            good_dis = jnp.linalg.norm(
-                vmap(distance, (None, 0))(
-                    state.position[pol_state[0]], state.position[good_pol]
-                ),
-                axis=-1,
-            )
-
-            atoms = atoms.at[..., -1].set(0)
-            atoms = atoms.at[:, good_pol[jnp.argmin(good_dis)], -1].set(1)
+        # if jnp.abs(magmom.sum()) < args.mag_thresh:
+        #     # Create configurations with different polaron
+        #     # TODO: Make it so that it fids the number of positions where the polaron can be,
+        #     # like selecting only the sites with the same species of the one where the polaron is right now
+        #     vatoms = jnp.repeat(atoms.at[..., -1].set(0), 96, 0)
+        #
+        #     _, pol, species = jnp.indices(vatoms.shape)
+        #
+        #     vatoms = jnp.where(
+        #         jnp.logical_and(
+        #             pol == jnp.arange(96)[:, jnp.newaxis, jnp.newaxis], species == 2
+        #         ),
+        #         1,
+        #         vatoms,
+        #     )
+        #
+        #     # Batch them
+        #     n_batch = 1 + (len(vatoms) // args.batch_size)
+        #
+        #     if len(vatoms) % args.batch_size == 0:
+        #         n_batch -= 1
+        #
+        #     vatoms = jnp.split(
+        #         vatoms,
+        #         [(i + 1) * args.batch_size for i in range(n_batch - 1)],
+        #         axis=0,
+        #     )
+        #
+        #     # Get how the total magmetization will evolve
+        #     next_magmoms = [predict_magmom_evolution(state, x) for x in vatoms]
+        #     next_magmoms = jnp.concat(next_magmoms, axis=0)
+        #
+        #     # Find right index
+        #     good_pol = (
+        #         jnp.isclose(next_magmoms, -1, atol=0.2, rtol=0).all(1).nonzero()[0]
+        #     )
+        #
+        #     good_dis = jnp.linalg.norm(
+        #         vmap(distance, (None, 0))(
+        #             state.position[pol_state[0]], state.position[good_pol]
+        #         ),
+        #         axis=-1,
+        #     )
+        #
+        #     atoms = atoms.at[..., -1].set(0)
+        #     atoms = atoms.at[:, good_pol[jnp.argmin(good_dis)], -1].set(1)
 
         # Compute interesting quantites
         temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
@@ -346,6 +345,8 @@ def main():
             positions=state.position,
             forces=state.force,
         )
+
+        pol_state = jnp.argsort(magmom[..., 0])
 
         # Log results
         if i % args.log_interval == 0:
