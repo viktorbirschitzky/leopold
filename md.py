@@ -153,10 +153,7 @@ def main():
         config, params, _ = pickle.load(f)
 
     # Construct data with it
-    # TODO: make if so that it directly reads the polaron state and not infer from magmom
-    # This is needed for scalability in future applications, for now is ok since we run
-    # on system on which we also have a dataset
-    data = get_data_from_atoms([atom], config.charge_sensitivity)
+    data = get_data_from_atoms([atom])
 
     # Use the data for the model
     _, apply_fn = get_model(
