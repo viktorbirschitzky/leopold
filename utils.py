@@ -134,9 +134,9 @@ def get_data_from_atoms(atoms: list[Atoms]) -> AtomsData:
         magmom = jnp.diff(atom.arrays["toccup"], axis=-1)
 
         polaron = jnp.zeros(len(atom))
-        polaron = polaron.at[jnp.argsort(magmom.flatten())[0]].set(1)
+        polaron = polaron.at[jnp.argsort(magmom)[0]].set(1)
 
-        species.append(jnp.append(_species, polaron, axis=1))
+        species.append(jnp.append(_species, polaron[:, jnp.newaxis], axis=1))
 
     return AtomsData(
         energies=jnp.array(energies),
@@ -284,11 +284,11 @@ class LeopoldCalculator(Calculator):
         :return:
         """
         # call to base-class to set atoms attribute
-
         Calculator.calculate(self, atoms)
 
         # prepare data
         pos, cell, species = get_model_inputs_from_atoms(atoms)
+
         # predict + extract data
         (energies, toccup), forces = self.compiled_model(
             self.params,
@@ -297,13 +297,17 @@ class LeopoldCalculator(Calculator):
             species,
         )
 
+        magmom = np.diff(toccup, axis=-1)[:, 0]
+
         self.results = {}
+
         # only store results the model actually computed to avoid KeyErrors
         self.results["energy"] = np.array(energies)
         self.results["free_energy"] = self.results["energy"]
+
         # "force consistant" energy
         self.results["forces"] = -np.array(forces)
-        self.results["magmom"] = np.diff(toccup, axis=-1)[:, 0]
+        self.results["magmom"] = magmom
 
 
 def get_average_num_neighbour(cell: Array, positions: Array, r_max) -> float:
