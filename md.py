@@ -12,9 +12,7 @@ import os
 import jax.numpy as jnp
 import jax.random as jrn
 
-from jax.tree_util import tree_map
-from jax import jit, vmap
-from jax.nn import softmax
+from jax import jit
 
 # Jax MD
 from jax_md import simulate, space
@@ -50,7 +48,6 @@ def arg_parse() -> Namespace:
     parser.add_argument("--time_step", type=float, default=1)
     parser.add_argument("--temperature", type=float, default=300)
     parser.add_argument("--num_steps", type=int, default=10_000_000)
-    parser.add_argument("--mag_thresh", type=float, default=0.8)
     parser.add_argument("--num_update", type=int, default=20)
 
     # Logging options
@@ -180,7 +177,7 @@ def main():
         config.predict_magmom = False
 
     # ---- DEFINE SIMULATION
-    distance, shift = space.periodic_general(data.cell[0])
+    _, shift = space.periodic_general(data.cell[0])
     init_fn, step_fn = simulate.nvt_nose_hoover(
         energy_fn,
         shift,
@@ -196,37 +193,6 @@ def main():
 
         return state, energy, toccup
 
-    vupdate = vmap(update)
-
-    @jit
-    def predict_magmom_evolution(state: NVTNoseHooverState, atoms: Array):
-        vstate = tree_map(lambda x: jnp.repeat(jnp.array([x]), len(atoms), 0), state)
-
-        magmom = []
-        for _ in range(args.num_update):
-            vstate, _, vtoccup = vupdate(vstate, atoms)
-
-            # Modify Polaron position
-            if not config.predict_magmom:
-                vmagmom = jnp.diff(vtoccup, axis=-1)
-            else:
-                vmagmom = vtoccup[:, :, 0:1]
-            pol_state = jnp.argmin(vmagmom[..., 0], axis=-1)
-
-            atoms = atoms.at[..., -1].set(0)
-            _, idx, spec = jnp.indices(atoms.shape)
-            atoms = jnp.where(
-                jnp.logical_and(
-                    idx == pol_state[:, jnp.newaxis, jnp.newaxis], spec == 2
-                ),
-                1,
-                atoms,
-            )
-
-            magmom.append(jnp.diff(vtoccup, axis=-1).sum(1)[..., 0])
-
-        return jnp.array(magmom).T
-
     # ---- INITIALIZATION
     state = init_fn(
         jrn.PRNGKey(args.seed),
@@ -239,12 +205,12 @@ def main():
     n_atoms = data.positions.shape[1]
 
     class Frame(tb.IsDescription):
-        energy = tb.Float32Col(pos=0)
-        temperature = tb.Float32Col(pos=1)
-        polaron = tb.Float32Col(shape=(n_atoms,), pos=2)
-        toccups = tb.Float32Col(shape=(n_atoms, 2), pos=3)
-        positions = tb.Float32Col(shape=(n_atoms, 3), pos=4)
-        forces = tb.Float32Col(shape=(n_atoms, 3), pos=5)
+        energy = tb.Float16Col(pos=0)
+        temperature = tb.Float16Col(pos=1)
+        polaron = tb.BoolCol(shape=(n_atoms,), pos=2)
+        toccups = tb.Float16Col(shape=(n_atoms, 2), pos=3)
+        positions = tb.Float16Col(shape=(n_atoms, 3), pos=4)
+        forces = tb.Float16Col(shape=(n_atoms, 3), pos=5)
 
     writer = TrajectoryWriter(
         args.batch_size, Frame, tag, args.out_dir, args.compression_level
@@ -282,56 +248,10 @@ def main():
             magmom = jnp.diff(toccup, axis=-1)
         else:
             magmom = toccup[:, 0:1]
-        pol_state = softmax(-config.charge_sensitivity * magmom, axis=0).flatten()
 
-        atoms = atoms.at[:, :, -1].set(pol_state)
-
-        # if jnp.abs(magmom.sum()) < args.mag_thresh:
-        #     # Create configurations with different polaron
-        #     # TODO: Make it so that it fids the number of positions where the polaron can be,
-        #     # like selecting only the sites with the same species of the one where the polaron is right now
-        #     vatoms = jnp.repeat(atoms.at[..., -1].set(0), 96, 0)
-        #
-        #     _, pol, species = jnp.indices(vatoms.shape)
-        #
-        #     vatoms = jnp.where(
-        #         jnp.logical_and(
-        #             pol == jnp.arange(96)[:, jnp.newaxis, jnp.newaxis], species == 2
-        #         ),
-        #         1,
-        #         vatoms,
-        #     )
-        #
-        #     # Batch them
-        #     n_batch = 1 + (len(vatoms) // args.batch_size)
-        #
-        #     if len(vatoms) % args.batch_size == 0:
-        #         n_batch -= 1
-        #
-        #     vatoms = jnp.split(
-        #         vatoms,
-        #         [(i + 1) * args.batch_size for i in range(n_batch - 1)],
-        #         axis=0,
-        #     )
-        #
-        #     # Get how the total magmetization will evolve
-        #     next_magmoms = [predict_magmom_evolution(state, x) for x in vatoms]
-        #     next_magmoms = jnp.concat(next_magmoms, axis=0)
-        #
-        #     # Find right index
-        #     good_pol = (
-        #         jnp.isclose(next_magmoms, -1, atol=0.2, rtol=0).all(1).nonzero()[0]
-        #     )
-        #
-        #     good_dis = jnp.linalg.norm(
-        #         vmap(distance, (None, 0))(
-        #             state.position[pol_state[0]], state.position[good_pol]
-        #         ),
-        #         axis=-1,
-        #     )
-        #
-        #     atoms = atoms.at[..., -1].set(0)
-        #     atoms = atoms.at[:, good_pol[jnp.argmin(good_dis)], -1].set(1)
+        pol_state = jnp.argsort(magmom.flatten())
+        atoms = atoms.at[:, :, -1].set(0)
+        atoms = atoms.at[:, pol_state[0], -1].set(1)
 
         # Compute interesting quantites
         temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
@@ -345,8 +265,6 @@ def main():
             positions=state.position,
             forces=state.force,
         )
-
-        pol_state = jnp.argsort(magmom[..., 0])
 
         # Log results
         if i % args.log_interval == 0:

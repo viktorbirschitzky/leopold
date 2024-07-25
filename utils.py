@@ -13,7 +13,6 @@ import numpy as np
 import jax.numpy as jnp
 import jax.random as jrn
 
-from jax.nn import softmax
 from jax import value_and_grad, vmap, jit
 
 # Jax MD
@@ -113,7 +112,7 @@ def shuffle_data(rng: Array, data: AtomsData) -> AtomsData:
     return AtomsData(**dict_data)
 
 
-def get_data_from_atoms(atoms: list[Atoms], charge_sensitivity: float) -> AtomsData:
+def get_data_from_atoms(atoms: list[Atoms]) -> AtomsData:
     # Informations about the chemical species
     elements = jnp.unique_values(
         jnp.array([z for atom in atoms for z in atom.get_atomic_numbers()])
@@ -134,13 +133,10 @@ def get_data_from_atoms(atoms: list[Atoms], charge_sensitivity: float) -> AtomsD
 
         magmom = jnp.diff(atom.arrays["toccup"], axis=-1)
 
-        species.append(
-            jnp.append(
-                _species,
-                jnp.array(softmax(-charge_sensitivity * magmom, axis=0)),
-                axis=1,
-            )
-        )
+        polaron = jnp.zeros(len(atom))
+        polaron = polaron.at[jnp.argsort(magmom.flatten())[0]].set(1)
+
+        species.append(jnp.append(_species, polaron, axis=1))
 
     return AtomsData(
         energies=jnp.array(energies),
@@ -154,7 +150,7 @@ def get_data_from_atoms(atoms: list[Atoms], charge_sensitivity: float) -> AtomsD
 
 
 def get_data_from_xyz(
-    file: str, charge_sensitivity: float, beg: int = 0, end: int = -1, step: int = 1
+    file: str, beg: int = 0, end: int = -1, step: int = 1
 ) -> AtomsData:
     atoms = read(
         file, index=f"{beg}:{end if end != -1 else ''}:{step}", format="extxyz"
@@ -162,7 +158,7 @@ def get_data_from_xyz(
     if not isinstance(atoms, list):
         atoms = [atoms]
 
-    return get_data_from_atoms(atoms, charge_sensitivity)
+    return get_data_from_atoms(atoms)
 
 
 def get_data_from_hdf5(
@@ -260,7 +256,7 @@ class LeopoldCalculator(Calculator):
             config, params, _ = pickle.load(f)
 
         # Load data
-        data = get_data_from_xyz(data_path, config.charge_sensitivity)
+        data = get_data_from_xyz(data_path)
         data = batch_data(data, 1)
 
         _, apply_fn = get_model(
