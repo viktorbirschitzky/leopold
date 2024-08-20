@@ -22,16 +22,12 @@ from jax_md.quantity import kinetic_energy, temperature
 from ase.io import read
 from ase import units
 
-# Tables
-import tables as tb
-
 # Utils
-from utils import get_model, get_data_from_atoms
+from utils import get_model, get_data_from_atoms, construct_traj_writer
 
 # Types
 from jax import Array
 from argparse import ArgumentParser, Namespace
-from utils import TrajectoryWriter
 from jax_md.simulate import NVTNoseHooverState
 from typing import Union, Optional
 
@@ -57,6 +53,7 @@ def arg_parse() -> Namespace:
     # Saving options
     parser.add_argument("--batch_size", type=int, default=20)
     parser.add_argument("--compression_level", type=int, default=5)
+    parser.add_argument("--reduced_frame", action="store_true")
 
     # General options
     parser.add_argument("--name", type=str, default=None)
@@ -199,19 +196,7 @@ def main():
     )
 
     # Setup trajectory writer
-    n_atoms = data.positions.shape[1]
-
-    class Frame(tb.IsDescription):
-        energy = tb.Float16Col(pos=0)
-        temperature = tb.Float16Col(pos=1)
-        polaron = tb.BoolCol(shape=(n_atoms,), pos=2)
-        toccups = tb.Float16Col(shape=(n_atoms, 2), pos=3)
-        positions = tb.Float16Col(shape=(n_atoms, 3), pos=4)
-        forces = tb.Float16Col(shape=(n_atoms, 3), pos=5)
-
-    writer = TrajectoryWriter(
-        args.batch_size, Frame, tag, args.out_dir, args.compression_level
-    )
+    writer = construct_traj_writer(tag, data.positions.shape[1], args)
 
     # Save the unit cell of the system
     writer.file.create_array(
@@ -254,14 +239,17 @@ def main():
         temp = temperature(velocity=state.velocity, mass=state.mass) / units.kB
 
         # Save data
-        writer(
-            energy=energy,
-            temperature=temp,
-            polaron=atoms[..., -1],
-            toccups=toccup,
-            positions=state.position,
-            forces=state.force,
-        )
+        if args.reduced_frame:
+            writer(polaron=atoms[..., -1], positions=state.position)
+        else:
+            writer(
+                energy=energy,
+                temperature=temp,
+                polaron=atoms[..., -1],
+                toccups=toccup,
+                positions=state.position,
+                forces=state.force,
+            )
 
         # Log results
         if i % args.log_interval == 0:

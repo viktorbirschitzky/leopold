@@ -35,6 +35,7 @@ from ml_collections import ConfigDict
 from typing import Tuple, List, Callable, NamedTuple, Union
 from tables import File
 from flax.typing import VariableDict
+from argparse import Namespace
 
 # ---- DATABASE FUNCTIONS
 
@@ -376,6 +377,30 @@ class TrajectoryWriter:
 
     def close(self):
         self.file.close()
+
+
+def construct_traj_writer(tag: str, n_atoms: int, args: Namespace) -> TrajectoryWriter:
+    if args.reduced_frame:
+
+        class Frame(tb.IsDescription):
+            polaron = tb.BoolCol(shape=(n_atoms,), pos=0)
+            positions = tb.Float16Col(shape=(n_atoms, 3), pos=1)
+
+        return TrajectoryWriter(
+            args.batch_size, Frame, tag, args.out_dir, args.compression_level
+        )
+
+    class Frame(tb.IsDescription):
+        energy = tb.Float16Col(pos=0)
+        temperature = tb.Float16Col(pos=1)
+        polaron = tb.BoolCol(shape=(n_atoms,), pos=2)
+        toccups = tb.Float16Col(shape=(n_atoms, 2), pos=3)
+        positions = tb.Float16Col(shape=(n_atoms, 3), pos=4)
+        forces = tb.Float16Col(shape=(n_atoms, 3), pos=5)
+
+    return TrajectoryWriter(
+        args.batch_size, Frame, tag, args.out_dir, args.compression_level
+    )
 
 
 # ---- MODEL FUNCTION
