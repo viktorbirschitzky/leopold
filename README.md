@@ -12,7 +12,7 @@ Viktor C. Birschitzky\*, Luca Leoni\*, Michele Reticcioli, and Cesare Franchini\
 
 ## Features
 
-- **Message-Passing Neural Network (MPNN):** Based on a modified version of the Neural Equivariant Interatomic Potential (NequIP) architecture.
+**Message-Passing Neural Network (MPNN):** Based on a modified version of the Neural Equivariant Interatomic Potential (NequIP) architecture as implemented in the [JAX-MD repository](https://github.com/google/jax-md).
 - **Polaron Encoding:** Explicit charge state encoding to ensure charge conservation.
 - **Occupation Prediction:** Direct prediction of site occupation to track polaron hopping.
 - **Implemented in JAX:** Optimized for high-performance machine learning training and inference.
@@ -81,7 +81,8 @@ If you use Leopold in your research, please cite our paper:
 
 ## License
 
-XXXXXXXX
+This project is licensed under the [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0).
+
 
 ## Contact
 
